@@ -1,0 +1,2160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>音频Q弹化工具箱</title>
+<style>
+  /* ============================================================
+     基础布局：全屏 canvas + 左上角浮动控制面板
+     桌面：左右两块浮动面板
+     手机(≤560px)：面板变成底部标签页 + 抽屉（见文件末尾的媒体查询）
+     ============================================================ */
+  :root {
+    --tabh: 54px;              /* 手机端底部标签栏高度 */
+    --sheet: 46dvh;            /* 手机端抽屉高度 */
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #07080f; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    color: #dfe6f5;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* canvas 铺满视口；真实像素尺寸由 JS 按 devicePixelRatio 设置。
+     高度用 dvh 而不是 vh —— 手机上 vh 等于"地址栏收起时"的高度，
+     会让画面底部藏到浏览器工具栏后面。dvh 跟随实际可视高度。 */
+  #stage { display: block; width: 100vw; height: 100vh; cursor: pointer; }
+  @supports (height: 100dvh) { #stage { height: 100dvh; } }
+
+  /* ---------- 浮动面板：左侧主控制 / 右侧背景颜色 ---------- */
+  .panel {
+    position: fixed; top: 12px; width: 272px;
+    max-height: calc(100vh - 24px); overflow-y: auto;
+    padding: 12px 13px 14px;
+    background: rgba(16, 20, 32, .84);
+    border: 1px solid rgba(255, 255, 255, .09);
+    border-radius: 13px;
+    backdrop-filter: blur(11px);
+    -webkit-backdrop-filter: blur(11px);
+    box-shadow: 0 12px 34px rgba(0, 0, 0, .5);
+    font-size: 12.5px;
+    user-select: none;
+  }
+  #panel      { left: 12px; }
+  #colorPanel { right: 12px; }
+  .panel.collapsed .pbody { display: none; }
+  .panel h1 {
+    margin: 0 0 9px; font-size: 13.5px; font-weight: 600; letter-spacing: .3px;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  }
+  .panel h1 button {
+    all: unset; cursor: pointer; font-size: 11px; padding: 2px 7px;
+    border-radius: 6px; background: rgba(255, 255, 255, .09); color: #b9c6de;
+  }
+  .panel h1 button:hover { background: rgba(255, 255, 255, .17); }
+  /* 面板禁用了文字选择，但输入框里必须能选中/编辑文本 */
+  .panel input { user-select: text; }
+
+  .row { display: flex; gap: 6px; margin-bottom: 7px; }
+  /* 导入按钮那一行：两个按钮各占整行。
+     并排时每个只有 112px（面板宽 272 减内边距、再减滚动条），而
+     「② 导入音频 / 视频」需要约 125px，会被 overflow:hidden 直接切掉。 */
+  .row.wrap { flex-wrap: wrap; }
+  .row.wrap .btn { flex: 1 1 100%; }
+  .btn {
+    flex: 1; cursor: pointer; text-align: center;
+    padding: 7px 6px; border-radius: 8px; font-size: 12px;
+    background: rgba(110, 168, 255, .16);
+    border: 1px solid rgba(110, 168, 255, .34);
+    color: #cfe1ff; transition: background .12s, border-color .12s;
+    white-space: nowrap; overflow: hidden;
+  }
+  .btn:hover { background: rgba(110, 168, 255, .3); }
+  .btn.on { background: rgba(255, 96, 110, .26); border-color: rgba(255, 96, 110, .6); color: #ffd4d8; }
+  .btn.ghost { background: rgba(255, 255, 255, .06); border-color: rgba(255, 255, 255, .14); color: #b9c6de; flex: 0 0 auto; padding: 7px 11px; }
+
+  /* 播放进度条 */
+  #seek { width: 100%; margin: 3px 0 8px; accent-color: #6ea8ff; height: 14px; }
+
+  /* 参数行：标签 + 数字输入框，下面一条滑块 */
+  .p { margin: 9px 0 0; }
+  .p .lab {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    font-size: 11.5px; color: #9fb0cc; margin-bottom: 3px;
+  }
+  .p .lab .name { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+  /* 参数说明图标：圆圈里的 i */
+  .p .lab .info {
+    flex: 0 0 auto; width: 13px; height: 13px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 9px; font-style: italic; font-weight: 700; line-height: 1;
+    color: #8798b5; border: 1px solid rgba(255, 255, 255, .3);
+    cursor: help; transition: color .15s, background .15s, border-color .15s;
+  }
+  .p .lab .info:hover, .p .lab .info:focus-visible {
+    color: #0b0f18; background: #8fc0ff; border-color: #8fc0ff; outline: none;
+  }
+  input[type=range] { width: 100%; height: 16px; accent-color: #6ea8ff; cursor: pointer; }
+
+  /* 数字输入框：直接键入精确数值，方向键也能微调 */
+  .p .num {
+    width: 58px; flex: 0 0 auto; padding: 1px 5px;
+    text-align: right; font: inherit; font-size: 11.5px; font-weight: 600;
+    color: #e8f0ff; font-variant-numeric: tabular-nums;
+    background: rgba(255, 255, 255, .07);
+    border: 1px solid rgba(255, 255, 255, .14); border-radius: 5px;
+    outline: none;
+  }
+  .p .num:hover { background: rgba(255, 255, 255, .12); }
+  .p .num:focus { border-color: #6ea8ff; background: rgba(110, 168, 255, .15); }
+  /* 隐藏数字框的上下箭头，避免在窄面板里挤掉数字位（方向键仍然可用） */
+  .p .num::-webkit-outer-spin-button,
+  .p .num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .p .num { -moz-appearance: textfield; appearance: textfield; }
+
+  /* 勾选项（如"显示地面倒影"） */
+  .check {
+    display: flex; align-items: center; gap: 7px;
+    cursor: pointer; font-size: 11.5px; color: #9fb0cc; user-select: none;
+  }
+  .check:hover { color: #cfd9ec; }
+  .check input {
+    width: 15px; height: 15px; margin: 0;
+    accent-color: #6ea8ff; cursor: pointer; flex: 0 0 auto;
+  }
+
+  /* 下拉选择 */
+  select {
+    width: 100%; padding: 6px 7px; border-radius: 7px; font-size: 12px;
+    background: rgba(255, 255, 255, .07); color: #dfe6f5;
+    border: 1px solid rgba(255, 255, 255, .14); outline: none; cursor: pointer;
+  }
+  select option { background: #12172a; }
+
+  /* 快捷背景色块 */
+  .swatches { display: flex; gap: 6px; margin-top: 7px; }
+  .sw {
+    flex: 1; height: 26px; padding: 0; border-radius: 7px; cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, .3);
+    transition: transform .1s, box-shadow .1s;
+  }
+  .sw:hover { transform: translateY(-1px); box-shadow: 0 3px 9px rgba(0, 0, 0, .45); }
+  .sw.active { outline: 2px solid #6ea8ff; outline-offset: 1px; }
+  #bgPreview, #wheelPreview {
+    width: 52px; height: 17px; border-radius: 5px; flex: 0 0 auto;
+    border: 1px solid rgba(255, 255, 255, .35); display: inline-block;
+  }
+
+  /* 色盘 */
+  #wheelBox { margin-top: 10px; }
+  #wheelCanvas {
+    display: block; margin: 2px auto 0; border-radius: 50%;
+    cursor: crosshair; touch-action: none;   /* 触屏上拖动时不要顺手滚页面 */
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, .18), 0 4px 14px rgba(0, 0, 0, .45);
+  }
+
+  .sep { height: 1px; background: rgba(255,255,255,.09); margin: 12px 0 2px; }
+
+  /* 能量表 + 帧率 */
+  #meterWrap { height: 6px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; margin: 2px 0 6px; }
+  #meter { height: 100%; width: 0%; background: linear-gradient(90deg, #3f7dff, #6ee7ff); transition: none; }
+  .hud { display: flex; justify-content: space-between; font-size: 11px; color: #8798b5; font-variant-numeric: tabular-nums; }
+  .tips { font-size: 11px; color: #74849f; line-height: 1.55; margin-top: 9px; }
+
+  /* ---------- 测试功能警告框 ---------- */
+  #warnMask {
+    position: fixed; inset: 0; z-index: 90;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(4, 7, 14, .62);
+    backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  }
+  /* 上面写了 display:flex，会盖掉 hidden 属性自带的 display:none，所以必须补这一条 */
+  #warnMask[hidden] { display: none; }
+  #warnBox {
+    width: min(370px, calc(100vw - 40px));
+    padding: 16px 18px 15px;
+    background: rgba(22, 28, 44, .98);
+    border: 1px solid rgba(255, 190, 90, .4);
+    border-radius: 13px;
+    box-shadow: 0 18px 46px rgba(0, 0, 0, .6);
+    color: #dfe6f5; font-size: 12.5px; line-height: 1.65;
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    user-select: none;
+  }
+  #warnTitle { font-size: 13.5px; font-weight: 600; color: #ffcf7a; margin-bottom: 9px; }
+  #warnBox p { margin: 0 0 8px; }
+  #warnBox p:last-of-type { margin-bottom: 0; }
+  #warnBox .dim { color: #93a2bd; font-size: 11.5px; }
+  #warnBox b { color: #ffe1ad; font-weight: 600; }
+  #warnOk {
+    all: unset; display: block; margin: 14px auto 0; cursor: pointer;
+    padding: 7px 24px; border-radius: 8px; font-size: 12px; text-align: center;
+    background: rgba(110, 168, 255, .18);
+    border: 1px solid rgba(110, 168, 255, .4);
+    color: #cfe1ff; transition: background .15s;
+  }
+  #warnOk:hover { background: rgba(110, 168, 255, .34); }
+
+  /* ---------- 参数说明气泡 ----------
+     单独挂到 body 上、用 fixed 定位：面板本身是 overflow-y:auto，
+     气泡若放在面板里会被裁掉。pointer-events:none 是为了不让它挡住鼠标造成闪烁。 */
+  #tip {
+    position: fixed; left: 0; top: 0; z-index: 70;
+    max-width: 250px; padding: 8px 10px;
+    background: rgba(22, 28, 44, .97);
+    border: 1px solid rgba(255, 255, 255, .14);
+    border-radius: 8px;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, .55);
+    color: #dfe6f5; font-size: 11.5px; line-height: 1.55;
+    pointer-events: none; opacity: 0;
+    transform: translateY(-2px);
+    transition: opacity .13s, transform .13s;
+  }
+  #tip.on { opacity: 1; transform: translateY(0); }
+
+  /* 提示条：放到底部居中，避免压住右侧的颜色面板 */  #toast {
+    position: fixed; bottom: 22px; left: 50%; padding: 9px 14px; border-radius: 9px;
+    background: rgba(20, 26, 42, .93); border: 1px solid rgba(255,255,255,.14);
+    font-size: 12.5px; opacity: 0; z-index: 60;
+    transform: translateX(-50%) translateY(10px);
+    transition: opacity .25s, transform .25s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ---------- 顶部隐藏下拉栏（制作信息） ----------
+     平时只是一个很淡的小标签，点一下才滑下来；z-index 压在拖拽遮罩(50)和提示条(60)下面 */
+  #credits {
+    position: fixed; top: 0; left: 50%; transform: translateX(-50%);
+    z-index: 40; display: flex; flex-direction: column; align-items: center;
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    user-select: none;
+  }
+  #creditsHandle {
+    all: unset; cursor: pointer;
+    display: flex; align-items: center; gap: 5px;
+    padding: 4px 15px 5px;
+    font-size: 11px; line-height: 1; letter-spacing: .3px; color: #8798b5;
+    background: rgba(16, 20, 32, .84);
+    border: 1px solid rgba(255, 255, 255, .09); border-top: none;
+    border-radius: 0 0 10px 10px;
+    backdrop-filter: blur(11px); -webkit-backdrop-filter: blur(11px);
+    opacity: .42;                                   /* 平时很淡，避免抢画面注意力 */
+    transition: opacity .2s, color .2s, border-radius .2s;
+  }
+  #creditsHandle:hover, #credits.open #creditsHandle { opacity: 1; color: #cfe1ff; }
+  #credits.open #creditsHandle { border-radius: 0; }
+  #creditsHandle .chev { display: inline-block; font-size: 10px; transition: transform .25s; }
+  #credits.open #creditsHandle .chev { transform: rotate(180deg); }
+
+  #creditsBody {
+    display: flex; align-items: center; justify-content: center;
+    flex-wrap: wrap; row-gap: 2px;
+    /* 宽度上限 = 视口减去左右两块面板所占的位置，交给它换行，
+       否则窗口一窄，这条横幅就会压在两侧面板上 */
+    max-width: max(220px, calc(100vw - 600px));
+    overflow: hidden; max-height: 0; opacity: 0; padding: 0 18px;
+    font-size: 12.5px; color: #dfe6f5;
+    background: rgba(16, 20, 32, .92);
+    border: 1px solid rgba(255, 255, 255, .09); border-top: none;
+    border-radius: 0 0 12px 12px;
+    backdrop-filter: blur(11px); -webkit-backdrop-filter: blur(11px);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, .5);
+    transition: max-height .28s ease, opacity .28s ease, padding .28s ease;
+  }
+  #credits.open #creditsBody { max-height: 150px; opacity: 1; padding: 10px 20px 12px; }
+  /* 用竖线分隔，免得和 "C·T" 里的间隔号看混 */
+  #creditsBody > span + span {
+    border-left: 1px solid rgba(255, 255, 255, .16);
+    margin-left: 16px; padding-left: 16px;
+  }
+  /* 署名链接：B 站主页，新标签打开 */
+  #creditsBody a {
+    color: #8fc0ff; text-decoration: none;
+    border-bottom: 1px solid rgba(143, 192, 255, .38);
+    transition: color .15s, border-color .15s;
+  }
+  #creditsBody a:hover { color: #dcebff; border-bottom-color: #dcebff; }
+  /* 版本号：比署名更淡一档，不抢视线 */
+  #creditsBody .ver { color: #7d8ca8; font-variant-numeric: tabular-nums; }
+
+  /* 窗口变窄时两块面板收窄，尽量不互相压到 */
+  @media (max-width: 780px) {
+    .panel { width: 208px; font-size: 11.5px; }
+    .p .num { width: 50px; }
+    #creditsHandle { padding: 3px 10px 4px; font-size: 10px; }
+    #creditsBody { font-size: 11.5px; max-width: max(170px, calc(100vw - 470px)); }
+    #creditsBody > span + span { margin-left: 10px; padding-left: 10px; }
+  }
+
+  /* ============================================================
+     手机端（≤560px）：两侧面板改成底部标签 + 抽屉
+     之所以卡在 560 而不是更小：两块面板各 208px，加边距要 440px 才放得下，
+     留点余量定在 560。再窄就必然重叠（360/375/390/414 实测都重叠）。
+     ============================================================ */
+  #tabbar { display: none; }
+
+  @media (max-width: 560px) {
+    /* 面板从"两侧浮层"变成"贴底的抽屉"，默认收起 */
+    #panel, #colorPanel {
+      left: 0; right: 0; top: auto; bottom: var(--tabh);
+      width: auto; max-height: none; height: var(--sheet);
+      border-radius: 14px 14px 0 0;
+      border-left: none; border-right: none; border-bottom: none;
+      display: none;
+    }
+    #panel.m-open, #colorPanel.m-open { display: block; }
+    /* 开合改由标签栏负责，标题栏那个「收起」就不需要了 */
+    .panel h1 button { display: none; }
+
+    #tabbar {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 95;
+      display: flex;
+      height: calc(var(--tabh) + env(safe-area-inset-bottom, 0px));
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+      background: rgba(13, 17, 28, .96);
+      border-top: 1px solid rgba(255, 255, 255, .1);
+      backdrop-filter: blur(11px); -webkit-backdrop-filter: blur(11px);
+      user-select: none;
+    }
+    .tab {
+      all: unset; flex: 1; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13.5px; color: #8798b5;
+      border-top: 2px solid transparent;
+      transition: color .15s, border-color .15s, background .15s;
+    }
+    .tab.on { color: #cfe1ff; border-top-color: #6ea8ff; background: rgba(110, 168, 255, .08); }
+
+    /* 抽屉打开时，把下半屏让出来给面板 —— 高度一变，渲染布局会自动跟着适配 */
+    #stage { height: calc(100vh - var(--tabh)); }
+    body.sheet-open #stage { height: calc(100vh - var(--sheet) - var(--tabh)); }
+    @supports (height: 100dvh) {
+      #stage { height: calc(100dvh - var(--tabh)); }
+      body.sheet-open #stage { height: calc(100dvh - var(--sheet) - var(--tabh)); }
+    }
+
+    /* 触控目标放大：滑块、数字框、ⓘ 图标、勾选框都要够点 */
+    input[type=range] { height: 30px; }
+    .p { margin-top: 13px; }
+    .p .lab { font-size: 12.5px; }
+    .p .num { width: 68px; padding: 4px 7px; font-size: 12.5px; }
+    .p .lab .info { width: 20px; height: 20px; font-size: 12px; }
+    .check input { width: 20px; height: 20px; }
+    .check { font-size: 12.5px; padding: 4px 0; }
+    select { padding: 9px 8px; font-size: 13px; }
+    .btn { padding: 11px 8px; font-size: 13px; }
+    #warnOk { padding: 11px 26px; font-size: 13px; }
+    #bgPreview, #wheelPreview { width: 62px; height: 22px; }
+
+    /* 提示条要抬到标签栏上面，否则被压住 */
+    #toast { bottom: calc(var(--tabh) + env(safe-area-inset-bottom, 0px) + 12px); }
+  }
+
+  /* 触摸设备没有鼠标，拖拽导入用不了，把那条提示藏起来 */
+  @media (hover: none) {
+    .drag-hint { display: none; }
+  }
+
+  /* 拖拽到窗口时的整屏高亮 */
+  #dropMask {    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(30, 60, 130, .3); border: 3px dashed rgba(130, 180, 255, .8);
+    font-size: 19px; color: #dbe7ff; z-index: 50;
+  }
+  #dropMask.on { display: flex; }
+</style>
+</head>
+<body>
+
+<canvas id="stage"></canvas>
+
+<!-- 隐藏的文件选择器，由面板按钮触发 -->
+<input type="file" id="fileImg" accept="image/*" hidden>
+<input type="file" id="fileAudio" accept="audio/*,video/mp4,video/webm,video/quicktime" hidden>
+
+<div id="panel" class="panel">
+  <h1>图片抖动设置 <button id="btnFold">收起</button></h1>
+
+  <div class="pbody">
+    <div class="row wrap">
+      <div class="btn" id="btnImg">① 导入图片</div>
+      <div class="btn" id="btnAudio">② 导入音频 / 视频</div>
+    </div>
+
+    <div class="row">
+      <div class="btn" id="btnPlay">▶ 播放</div>
+      <div class="btn" id="btnHit">手动冲击</div>
+      <div class="btn" id="btnRec">● 录制</div>
+    </div>
+
+    <input type="range" id="seek" min="0" max="100" step="0.01" value="0">
+    <div class="hud"><span id="tNow">00:00</span><span id="tAll">00:00</span></div>
+
+    <div class="p" style="margin-top:10px">
+      <div class="lab"><span>抖动模式</span></div>
+      <select id="modeSel">
+        <option value="stretch">弹性回缩（位移 + 形变）</option>
+        <option value="inplace">原地伸缩（只变形，不位移）</option>
+        <option value="jump">刚性跳跃（纯位移）</option>
+        <option value="wave">逐行波浪</option>
+      </select>
+    </div>
+
+    <div class="p">
+      <div class="lab"><span>伸缩锚点</span></div>
+      <select id="anchorSel">
+        <option value="0">底部贴地 · 往上长</option>
+        <option value="0.5">中心固定 · 上下对称</option>
+        <option value="1">顶部固定 · 往下长</option>
+      </select>
+    </div>
+
+    <div class="p">
+      <div class="lab"><span>驱动频段</span></div>
+      <select id="bandSel">
+        <option value="bass">低频 20–250 Hz（鼓点）</option>
+        <option value="full">全频 20 Hz–6 kHz</option>
+        <option value="mid">中高频 0.8–5 kHz</option>
+      </select>
+    </div>
+
+    <div class="p">
+      <div class="lab"><span>地面效果</span></div>
+      <label class="check">
+        <input type="checkbox" id="reflectChk" checked>
+        <span>倒影</span>
+      </label>
+      <label class="check" style="margin-top:6px">
+        <input type="checkbox" id="shadowChk" checked>
+        <span>阴影</span>
+      </label>
+    </div>
+
+    <div class="sep"></div>
+
+    <!-- 参数滑块由 JS 按 PARAM_DEFS 动态生成，避免手写重复 HTML
+         每一行 = 标签 + 数字输入框 + 滑块 -->
+    <div id="sliders"></div>
+
+    <div class="row" style="margin-top:11px">
+      <div class="btn ghost" id="btnReset" style="flex:1">恢复默认参数</div>
+    </div>
+
+    <div id="meterWrap"><div id="meter"></div></div>
+    <div class="hud"><span>能量 / 包络</span><span id="fps">-- fps</span></div>
+
+    <div class="tips">
+      每个参数都能<b>直接键入数值</b>（也可以用 ↑↓ 微调）。<br>
+      录制<b>优先出 MP4</b>，浏览器不支持时自动退 WebM（开始录制时会提示实际格式）。<br>
+      快捷键：<b>空格</b> 播放/暂停 · <b>K</b> 手动冲击 · <b>H</b> 收起两侧面板<br>
+      <span class="drag-hint">也可以直接把图片 / 音频拖进窗口。</span>参数会自动保存到浏览器。
+    </div>
+  </div>
+</div>
+
+<!-- ============ 右侧：背景颜色面板 ============ -->
+<div id="colorPanel" class="panel">
+  <h1>背景颜色 <button id="btnFoldColor">收起</button></h1>
+
+  <div class="pbody">
+    <div class="p" style="margin-top:2px">
+      <div class="lab"><span>填充样式</span></div>
+      <select id="bgStyleSel">
+        <option value="radial">径向渐变（推荐）</option>
+        <option value="solid">纯色平涂</option>
+      </select>
+    </div>
+
+    <!-- R / G / B 三个参数由 PARAM_DEFS 里 group:'bg' 的项生成到这里 -->
+    <div id="bgSliders"></div>
+
+    <div class="p">
+      <div class="lab"><span>快捷颜色</span><span id="bgPreview" title="当前背景色"></span></div>
+      <div class="swatches" id="bgPresets"></div>
+    </div>
+
+    <!-- 两种取色方式：色盘 / 从导入的图片上吸取 -->
+    <div class="row" style="margin-top:10px">
+      <div class="btn" id="btnWheel">色盘</div>
+      <div class="btn" id="btnPick">吸管取色</div>
+    </div>
+
+    <!-- 色盘：默认收起，点「色盘」才展开（底图是现算的，不用就不算） -->
+    <div id="wheelBox" hidden>
+      <canvas id="wheelCanvas"></canvas>
+      <div class="p">
+        <div class="lab"><span>明度</span>
+          <input class="num" type="number" id="valNum" min="0" max="100" step="1"></div>
+        <input class="rng" type="range" id="valRange" min="0" max="100" step="1">
+      </div>
+      <div class="p">
+        <div class="lab"><span>此色</span><span id="wheelPreview" title="色盘当前颜色"></span></div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:11px">
+      <div class="btn ghost" id="btnResetBg" style="flex:1">重置颜色</div>
+    </div>
+
+    <div class="tips">
+      黑 / 绿 / 蓝 / 白 是预设，点一下就把三个数值写进去，之后还能继续微调。<br>
+      <b>色盘</b>：色相绕圈、饱和度由内向外，下面的明度条配合调深浅。<br>
+      <b>吸管取色</b>：点一下按钮，再去画面上点你想取的位置即可。<br>
+      倒影的淡出会跟着背景色自动适配，换成白底也不会出现黑边。
+    </div>
+  </div>
+</div>
+
+<!-- ============ 顶部隐藏下拉栏：制作信息 ============ -->
+<div id="credits">
+  <button id="creditsHandle" aria-expanded="false" aria-controls="creditsBody"
+          title="展开 / 收起制作信息">
+    <span class="chev">▾</span><span>制作信息</span>
+  </button>
+  <div id="creditsBody">
+    <span>策划：<a href="https://space.bilibili.com/411612864"
+                  target="_blank" rel="noopener noreferrer">C·T</a></span>
+    <span>项目管理：<a href="https://space.bilibili.com/441027641"
+                    target="_blank" rel="noopener noreferrer">瀚海</a></span>
+    <span>代码实现：dsh</span>
+    <span id="creditsVersion" class="ver"></span>
+  </div>
+</div>
+
+<!-- 从视频取音频属于测试功能，导入视频时弹这个 -->
+<div id="warnMask" hidden>
+  <div id="warnBox" role="alertdialog" aria-modal="true" aria-labelledby="warnTitle">
+    <div id="warnTitle">⚠︎ 测试功能</div>
+    <p>从<b>视频文件</b>中读取音频目前处于<b>测试阶段</b>，可能出现 bug。</p>
+    <p class="dim">如果导入后画面不动、或完全没有声音，多半是这个视频的音轨编码浏览器解不了，
+      建议改用纯音频文件（MP3 / WAV / M4A）。</p>
+    <button id="warnOk">我知道了</button>
+  </div>
+</div>
+
+<!-- 手机端底部标签栏（桌面端由 CSS 隐藏） -->
+<nav id="tabbar">
+  <button class="tab" data-tab="settings">抖动设置</button>
+  <button class="tab" data-tab="color">背景颜色</button>
+</nav>
+
+<div id="toast"></div>
+<div id="tip"></div>
+<div id="dropMask">松开鼠标即可导入</div>
+
+<!-- 空 audio 元素：只作为解码与播放的载体，音频数据走 Web Audio 图 -->
+<audio id="audio"></audio>
+
+<script>
+'use strict';
+/* ============================================================================
+ * 音频驱动图片上下抖动（带挤压/回缩）—— 单文件原型
+ *
+ * 整条数据链路：
+ *   音频文件 → AudioContext → AnalyserNode → 低频能量(0~1)
+ *            → 噪声门 + 自动增益 → 非对称包络平滑 → 强度 env
+ *            → 弹簧 → 位置 springY + 速度 springV
+ *            → 画到 canvas
+ *
+ * 三种形变方式，按需选：
+ *   stretch 弹性回缩：位置画位移；形变是速度的副产品（向上冲拉长、回落压扁）
+ *   inplace 原地伸缩：位置恒为 0；位置信号画"伸长"，速度信号画"压缩"
+ *   jump    刚性跳跃：只有位移，不变形
+ *
+ * 两个地方决定观感，别的地方随便调都救不回来：
+ *   1) 包络：上升快(attack) + 回落慢(release)，否则画面又抖又脏；
+ *   2) 弹簧：把"瞬移到位"变成"冲过头 → 落回 → 压过头 → 抖动收敛"，
+ *      弹性(spring)给惯性，拉伸(stretch)/回缩(squash)给形变分量。
+ * ========================================================================== */
+
+/** 版本号：只在这里维护一处，顶部「制作信息」下拉栏会自动读取显示 */
+const APP_VERSION = 'v1.0.0';
+
+/* ============================================================
+   0. DOM 引用与全局状态
+   ============================================================ */
+const canvas   = document.getElementById('stage');
+const ctx      = canvas.getContext('2d');
+const audio    = document.getElementById('audio');
+const panel    = document.getElementById('panel');
+const slidersEl  = document.getElementById('sliders');
+const bgSlidersEl= document.getElementById('bgSliders');
+const meterEl  = document.getElementById('meter');
+const fpsEl    = document.getElementById('fps');
+const seekEl   = document.getElementById('seek');
+const tNowEl   = document.getElementById('tNow');
+const tAllEl   = document.getElementById('tAll');
+const modeSel  = document.getElementById('modeSel');
+const anchorSel= document.getElementById('anchorSel');
+const bandSel  = document.getElementById('bandSel');
+const bgStyleSel = document.getElementById('bgStyleSel');
+const bgPrevEl   = document.getElementById('bgPreview');
+const bgPresetsEl= document.getElementById('bgPresets');
+const reflectChk = document.getElementById('reflectChk');
+const shadowChk  = document.getElementById('shadowChk');
+const creditsEl  = document.getElementById('credits');
+const creditsBtn = document.getElementById('creditsHandle');
+const wheelBox   = document.getElementById('wheelBox');
+const wheelCanvas= document.getElementById('wheelCanvas');
+const wheelPreview = document.getElementById('wheelPreview');
+const valRange   = document.getElementById('valRange');
+const valNum     = document.getElementById('valNum');
+const toastEl  = document.getElementById('toast');
+const tipEl    = document.getElementById('tip');
+const warnMask = document.getElementById('warnMask');
+const warnOk   = document.getElementById('warnOk');
+const tabbarEl = document.getElementById('tabbar');
+const dropMask = document.getElementById('dropMask');
+
+let img        = null;   // 已导入的图片（ImageBitmap 或 HTMLImageElement）
+let audioCtx   = null;   // AudioContext —— 必须等用户手势后才能创建
+let srcNode    = null;   // MediaElementAudioSourceNode（一个 audio 元素只能建一次）
+let analyser   = null;   // 频谱分析节点
+let freqData   = null;   // 频谱原始数据（Uint8Array，每帧被 analyser 覆写）
+let recDest    = null;   // 录制用的音频出口（把声音也混进录像）
+let binRange   = null;   // 当前频段对应的 bin 索引区间，缓存起来避免每帧重算
+
+let env        = 0;      // 包络后的强度（0~1）—— 音频侧最终输出
+let springY    = 0;      // 主弹簧：垂直位移(px)，负 = 向上
+let springV    = 0;      // 主弹簧：垂直速度(px/s)
+                         //   弹性回缩模式：位置画位移，速度画形变
+                         //   原地伸缩模式：位置画高度，速度画压缩（位置不参与绘制）
+let manualHit  = 0;      // 手动冲击的冲量，逐帧衰减
+let history    = [];     // 强度历史，供「逐行波浪」模式做延迟取样
+let agcPeak    = 0.02;   // 自动增益用的近期峰值
+let recording  = null;   // MediaRecorder 实例（null 表示没在录）
+let recChunks  = [];
+let dragging   = false;  // 是否正在拖动进度条
+
+const HISTORY_MAX = 90;  // 历史长度（帧），约 1.5 秒 @60fps
+const WAVE_DELAY  = 20;  // 波浪模式：顶部切片相对底部滞后多少帧
+const SLICES      = 28;  // 波浪模式的横向切片数量
+
+/* --- 形变归一化用的常量，集中放这里方便调 --- */
+const INPLACE_AMP  = 80;              // 原地伸缩模式下弹簧的基准幅度(px)，见 springAmp()
+const REF_UP       = 1500;            // 速度 → 形变：上升段参考速度(px/s)
+const REF_DOWN     = REF_UP * 0.45;   // 回落段参考速度，故意更小（回落天生比上升慢）
+const RETRACT_GAIN = 1.6;             // 压缩增益补偿，原因见 drawFrame 里的说明
+
+/* ============================================================
+   1. 可调参数：定义 + 自动生成 UI + localStorage 持久化
+   ============================================================ */
+const PARAM_DEFS = [
+  // key        显示名            最小   最大   步长    默认值   说明
+  // help 字段 = 参数名右边那个 ⓘ 图标悬停时弹出的帮助文字
+  { key:'gain',      label:'灵敏度',        min:0.2, max:4,   step:0.05, def:1.00,
+    help:'总幅度开关。数值越大，同样的音乐抖得越猛。配合「自动增益」使用效果最稳。' },
+  { key:'agc',       label:'自动增益',      min:0,   max:1,   step:0.05, def:0.75,
+    help:'按近期峰值把音量自动归一化，这样换一首歌不必重新调灵敏度。调到 0 就完全按原始响度走。' },
+  { key:'threshold', label:'噪声门',        min:0,   max:0.5, step:0.01, def:0.06,
+    help:'低于这个强度的信号一律按静音处理。调高可以让安静段落彻底不动，避免细碎噪声让画面乱抖。' },
+  { key:'attack',    label:'上升速度',      min:0.02,max:1,   step:0.01, def:0.45,
+    help:'强度上涨时的跟随速度。越大起跳越干脆、鼓点越有冲击力；过大容易显得神经质。' },
+  { key:'release',   label:'回落速度',      min:0.01,max:0.5, step:0.005,def:0.07,
+    help:'强度下降时的跟随速度。越小回落越黏、余韵越长；过大画面会显得干瘪。' },
+  { key:'maxShift',  label:'最大位移(px)',  min:0,   max:300, step:1,    def:80,
+    help:'画面上下移动的最大像素距离。它同时也会放大形变幅度。「原地伸缩」模式下不做位移，此项不生效。' },
+  { key:'spring',    label:'弹性回弹',      min:0,   max:1,   step:0.02, def:0.60,
+    help:'惯性大小。调高会冲过头再弹回来、甚至来回摆几次，像橡皮筋；调到 0 就只是平滑跟随、不回弹。' },
+  { key:'stretch',   label:'拉伸强度',      min:0,   max:0.5, step:0.01, def:0.14,
+    help:'向上冲的时候竖直拉长多少。设为 0 就只剩压缩、没有拉伸。' },
+  { key:'squash',    label:'回缩强度',      min:0,   max:0.5, step:0.01, def:0.24,
+    help:'回落的时候竖直压扁多少，也就是「回缩」。想让画面压得比原图还矮，就靠这一项。' },
+  { key:'rotate',    label:'微旋转(度)',    min:0,   max:6,   step:0.1,  def:1.5,
+    help:'抖动时附带的最大旋转角度。用缓慢的正弦摆动，给画面一点生命感，不做正负跳变。' },
+  { key:'glow',      label:'光晕强度',      min:0,   max:1,   step:0.02, def:0.50,
+    help:'图片背后那层随音乐呼吸的蓝光。注意白底上看不出来——加亮混合在纯白上等于无效。' },
+  // 背景色三项：group:'bg' 表示渲染到右侧颜色面板；int 表示显示成整数；
+  // after 表示改完要刷新色块预览
+  { key:'bgR',       label:'红 R',          min:0,   max:255, step:1,    def:12,  int:true, group:'bg', after:onColorChanged },
+  { key:'bgG',       label:'绿 G',          min:0,   max:255, step:1,    def:16,  int:true, group:'bg', after:onColorChanged },
+  { key:'bgB',       label:'蓝 B',          min:0,   max:255, step:1,    def:32,  int:true, group:'bg', after:onColorChanged },
+];
+
+/** 默认背景 rgb(12,16,32) 配合上面的径向渐变，得到的就是原来的深蓝黑底色 */
+const BG_PRESETS = [
+  { name: '黑', rgb: [0, 0, 0] },
+  { name: '绿', rgb: [0, 177, 64] },
+  { name: '蓝', rgb: [0, 0, 255] },
+  { name: '白', rgb: [255, 255, 255] },
+];
+
+const P = {};                       // 当前参数值
+const LS_KEY = 'av-image-shake-v1'; // localStorage 存储键
+
+/** 从 localStorage 读取参数；任何异常（file:// 下可能被禁用）都退回默认值 */
+function loadParams() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(LS_KEY) || '{}') || {}; } catch (e) { saved = {}; }
+  for (const d of PARAM_DEFS) {
+    P[d.key] = (typeof saved[d.key] === 'number' && isFinite(saved[d.key])) ? saved[d.key] : d.def;
+  }
+}
+
+/** 保存参数（同样要容错：无痕模式 / file:// 可能抛异常） */
+function saveParams() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(P)); } catch (e) { /* 忽略 */ }
+}
+
+/**
+ * 按 PARAM_DEFS 生成参数行。每行 = 标签 + 数字输入框 + 滑块。
+ * group:'bg' 的项渲染进右侧颜色面板，其余进左侧主面板。
+ */
+function buildSliders() {
+  for (const d of PARAM_DEFS) {
+    const host = d.group === 'bg' ? bgSlidersEl : slidersEl;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'p';
+    wrap.dataset.key = d.key;
+    // 有 help 文案的参数，在名字右边挂一个 ⓘ 图标（悬停/聚焦时弹出说明）
+    const infoHtml = d.help
+      ? '<i class="info" tabindex="0" data-tip="' + escAttr(d.help) + '">i</i>'
+      : '';
+    wrap.innerHTML =
+      '<div class="lab"><span class="name">' + d.label + infoHtml + '</span>' +
+        '<input class="num" type="number" inputmode="decimal" ' +
+        'min="' + d.min + '" max="' + d.max + '" step="' + d.step + '"></div>' +
+      '<input class="rng" type="range" min="' + d.min + '" max="' + d.max +
+        '" step="' + d.step + '">';
+
+    const range = wrap.querySelector('.rng');
+    const num   = wrap.querySelector('.num');
+
+    /**
+     * 把某个值写进这一行。
+     * keepText = true 时不动数字框里的文本 —— 用户正在键入的过程中，
+     * 我们不能把他的 "1"、"1." 这种中间状态改写掉。
+     */
+    const apply = (v, keepText) => {
+      if (!isFinite(v)) return;
+      v = Math.max(d.min, Math.min(d.max, v));   // 夹到定义域，防止越界值破坏渲染
+      P[d.key] = v;
+      range.value = v;
+      if (!keepText) num.value = fmt(d.key, v);
+      saveParams();
+      if (d.after) d.after();
+    };
+
+    // 拖滑块
+    range.addEventListener('input', () => apply(parseFloat(range.value), false));
+
+    // 在数字框里键入：边打边生效（但不改写文本，见上面的说明）
+    num.addEventListener('input', () => apply(parseFloat(num.value), true));
+
+    // 失焦或回车：把文本规范化，顺带把被夹过的真实值显示出来
+    const normalize = () => { num.value = fmt(d.key, P[d.key]); };
+    num.addEventListener('change', normalize);
+    num.addEventListener('blur', normalize);
+
+    // 初始化显示
+    range.value = P[d.key];
+    num.value   = fmt(d.key, P[d.key]);
+
+    host.appendChild(wrap);
+  }
+}
+
+/** 左右两个面板里的所有参数行 */
+function allParamWraps() {
+  return [].concat(Array.from(slidersEl.children), Array.from(bgSlidersEl.children));
+}
+
+/** 把某个参数的当前值同步回 UI（恢复默认、点快捷色之后调用） */
+function syncParamUI(key) {
+  const wrap = allParamWraps().find(w => w.dataset.key === key);
+  if (!wrap) return;
+  wrap.querySelector('.rng').value = P[key];
+  wrap.querySelector('.num').value = fmt(key, P[key]);
+}
+
+/** 参数显示格式化：标了 int 的不带小数 */
+function fmt(key, v) {
+  const d = PARAM_DEFS.find(x => x.key === key);
+  if (d && d.int) return String(Math.round(v));
+  return (Math.round(v * 100) / 100).toString();
+}
+
+/** 转义成可以安全放进 HTML 属性的文本（帮助文案里有引号等字符） */
+function escAttr(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/** 恢复默认参数，并同步刷新所有滑块的滑块位置与数字框 */
+function resetParams() {
+  for (const d of PARAM_DEFS) P[d.key] = d.def;
+  saveParams();
+  for (const d of PARAM_DEFS) syncParamUI(d.key);
+  onColorChanged();   // 背景色也被重置了，预览和色盘都要跟上
+  toast('已恢复默认参数');
+}
+
+/* ------------------------------------------------------------
+   1.5 背景颜色：快捷色块 + 预览
+   ------------------------------------------------------------ */
+
+/** 把当前 RGB 同步到预览色块，并高亮命中的快捷色 */
+function refreshBgUI() {
+  const c = bgColor();
+  if (bgPrevEl) bgPrevEl.style.background = cssRGB(c);
+  if (!bgPresetsEl) return;
+  // 逐个色块比对，完全相等才算"选中"
+  for (const btn of bgPresetsEl.children) {
+    const p = btn.dataset.rgb.split(',').map(Number);
+    btn.classList.toggle('active', p[0] === c[0] && p[1] === c[1] && p[2] === c[2]);
+  }
+}
+
+/** 生成四个快捷背景色块（黑 / 绿 / 蓝 / 白） */
+function buildPresets() {
+  if (!bgPresetsEl) return;
+  for (const preset of BG_PRESETS) {
+    const btn = document.createElement('button');
+    btn.className = 'sw';
+    btn.dataset.rgb = preset.rgb.join(',');
+    btn.style.background = cssRGB(preset.rgb);
+    btn.title = preset.name + '  rgb(' + preset.rgb.join(', ') + ')';
+    btn.onclick = () => {
+      setBgRGB(preset.rgb[0], preset.rgb[1], preset.rgb[2]);
+      onColorChanged();
+      toast('背景色：' + preset.name + '  rgb(' + preset.rgb.join(', ') + ')');
+    };
+    bgPresetsEl.appendChild(btn);
+  }
+}
+
+/** 点快捷色后，把 R/G/B 三行的滑块和数字框一起同步 */
+function syncBgSliders() {
+  for (const d of PARAM_DEFS) if (d.group === 'bg') syncParamUI(d.key);
+}
+
+/** 只把背景色恢复成默认（不动其他参数） */
+function resetBgColor() {
+  for (const d of PARAM_DEFS) if (d.group === 'bg') P[d.key] = d.def;
+  saveParams();
+  syncBgSliders();
+  onColorChanged();
+  toast('背景颜色已重置');
+}
+
+/* ------------------------------------------------------------
+   1.6 取色：色盘 + 吸管
+   ------------------------------------------------------------ */
+
+/* 色盘的当前状态。H/S/V 分开存，不每次从 RGB 反推 ——
+   否则把明度拖到 0（纯黑）时色相和饱和度会丢失，再往上拉就变灰了。 */
+let wheelH = 0;      // 色相 0~360
+let wheelS = 0;      // 饱和度 0~1
+let wheelV = 0.13;   // 明度 0~1
+let wheelReady = false;
+let picking = false; // 吸管取色模式是否开启
+
+/** HSV → RGB。h 单位是度，s/v 是 0~1，返回 0~255 的三元组 */
+function hsvToRgb(h, s, v) {
+  h = ((h % 360) + 360) % 360;
+  const c = v * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = v - c;
+  let r = 0, g = 0, b = 0;
+  if (h < 60)       { r = c; g = x; }
+  else if (h < 120) { r = x; g = c; }
+  else if (h < 180) { g = c; b = x; }
+  else if (h < 240) { g = x; b = c; }
+  else if (h < 300) { r = x; b = c; }
+  else              { r = c; b = x; }
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+}
+
+/** RGB → HSV，返回 {h, s, v} */
+function rgbToHsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  let h = 0;
+  if (d > 0) {
+    if (max === r)      h = 60 * (((g - b) / d) % 6);
+    else if (max === g) h = 60 * ((b - r) / d + 2);
+    else                h = 60 * ((r - g) / d + 4);
+  }
+  if (h < 0) h += 360;
+  return { h: h, s: max === 0 ? 0 : d / max, v: max };
+}
+
+/** 直接写入背景 RGB（预设、吸管、色盘共用同一条路径） */
+function setBgRGB(r, g, b) {
+  P.bgR = Math.max(0, Math.min(255, Math.round(r)));
+  P.bgG = Math.max(0, Math.min(255, Math.round(g)));
+  P.bgB = Math.max(0, Math.min(255, Math.round(b)));
+  saveParams();
+  syncBgSliders();
+}
+
+/** 背景色被改动后的统一收尾：刷新预览 + 同步色盘 */
+function onColorChanged() {
+  refreshBgUI();
+  syncWheelFromRGB();
+}
+
+const WHEEL_SRC  = 256;   // 色盘底图分辨率：够细腻，生成一次约几十毫秒
+const WHEEL_DISP = 200;   // 屏幕上显示的边长（CSS 像素）
+let wheelBitmap = null;   // 缓存的底图，只生成一次
+let wheelCtx = null;
+
+/**
+ * 生成色盘底图：色相 = 绕圈角度，饱和度 = 离圆心的距离，明度固定 1。
+ * 明度另外用滑条控制，这样比三维色立体好操作得多。
+ */
+function buildWheelBitmap() {
+  const S = WHEEL_SRC, R = S / 2;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const cc = c.getContext('2d');
+  const img = cc.createImageData(S, S);
+  const data = img.data;
+  for (let y = 0, i = 0; y < S; y++) {
+    const dy = y - R + 0.5;
+    for (let x = 0; x < S; x++, i += 4) {
+      const dx = x - R + 0.5;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > R) continue;                       // 圆外保持全透明
+      const hue = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360;
+      const sat = Math.min(1, dist / R);
+      const rgb = hsvToRgb(hue, sat, 1);
+      data[i] = rgb[0]; data[i + 1] = rgb[1]; data[i + 2] = rgb[2];
+      // 最外一圈按距离淡出，否则圆边是硬锯齿
+      data[i + 3] = dist > R - 1 ? Math.max(0, Math.round(255 * (R - dist))) : 255;
+    }
+  }
+  cc.putImageData(img, 0, 0);
+  wheelBitmap = c;
+}
+
+/** 首次展开色盘时才做底图和尺寸设置 */
+function ensureWheel() {
+  if (wheelReady) return;
+  buildWheelBitmap();
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  wheelCanvas.width = wheelCanvas.height = Math.round(WHEEL_DISP * dpr);
+  wheelCanvas.style.width = wheelCanvas.style.height = WHEEL_DISP + 'px';
+  wheelCtx = wheelCanvas.getContext('2d');
+  wheelCtx.setTransform(dpr, 0, 0, dpr, 0, 0);   // 之后一律按 CSS 像素坐标画
+  wheelReady = true;
+}
+
+/** 重画色盘 + 当前颜色的位置标记 */
+function drawWheel() {
+  if (!wheelReady) return;
+  const W = WHEEL_DISP, R = W / 2;
+  wheelCtx.clearRect(0, 0, W, W);
+  wheelCtx.drawImage(wheelBitmap, 0, 0, W, W);
+
+  // 标记点：角度 = 色相，半径 = 饱和度。坐标系和底图一致（y 轴向下）
+  const ang = wheelH * Math.PI / 180;
+  const rad = wheelS * R;
+  const mx = R + Math.cos(ang) * rad;
+  const my = R + Math.sin(ang) * rad;
+  // 先画深色粗环再叠白色细环，这样在任何底色上都看得见
+  wheelCtx.beginPath(); wheelCtx.arc(mx, my, 6, 0, Math.PI * 2);
+  wheelCtx.lineWidth = 3; wheelCtx.strokeStyle = 'rgba(0,0,0,.7)'; wheelCtx.stroke();
+  wheelCtx.beginPath(); wheelCtx.arc(mx, my, 6, 0, Math.PI * 2);
+  wheelCtx.lineWidth = 1.4; wheelCtx.strokeStyle = '#fff'; wheelCtx.stroke();
+}
+
+/** 把当前背景色反推回色盘状态（预设、吸管、手改 RGB 之后调用） */
+function syncWheelFromRGB() {
+  const c = bgColor();
+  const hsv = rgbToHsv(c[0], c[1], c[2]);
+  // 纯黑/纯灰时色相无意义，保留原来的色相，免得标记点乱跳
+  if (hsv.s > 0.001) wheelH = hsv.h;
+  if (hsv.v > 0.001) wheelS = hsv.s;
+  wheelV = hsv.v;
+  const pct = Math.round(wheelV * 100);
+  if (valNum)   valNum.value = pct;
+  if (valRange) valRange.value = pct;
+  if (wheelPreview) wheelPreview.style.background = cssRGB(c);
+  if (wheelReady && !wheelBox.hidden) drawWheel();
+}
+
+/** 用当前的 H/S/V 算出颜色并应用 */
+function applyWheelColor() {
+  const rgb = hsvToRgb(wheelH, wheelS, wheelV);
+  setBgRGB(rgb[0], rgb[1], rgb[2]);
+  refreshBgUI();
+  if (wheelPreview) wheelPreview.style.background = cssRGB(rgb);
+  drawWheel();
+}
+
+/** 从色盘上的一个点取出 H 和 S */
+function wheelSetFromPointer(e) {
+  const rect = wheelCanvas.getBoundingClientRect();
+  const R = WHEEL_DISP / 2;
+  const x = e.clientX - rect.left - R;
+  const y = e.clientY - rect.top - R;
+  wheelH = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  wheelS = Math.min(1, Math.sqrt(x * x + y * y) / R);
+  applyWheelColor();
+}
+
+/** 开关吸管取色模式 */
+function setPicking(on) {
+  picking = on;
+  canvas.style.cursor = on ? 'crosshair' : 'pointer';
+  const btn = document.getElementById('btnPick');
+  btn.classList.toggle('on', on);
+  btn.textContent = on ? '点画面取色…' : '吸管取色';
+  if (on) toast('在画面上点一下要取的颜色（Esc 取消）');
+}
+
+/**
+ * 吸管：读取画面上该点的像素颜色。
+ * 坐标要从 CSS 像素换算到 canvas 的真实像素（可能有 devicePixelRatio 倍率）。
+ */
+function pickColorAt(e) {
+  setPicking(false);
+  if (!img) { toast('先导入图片再取色'); return; }
+  const rect = canvas.getBoundingClientRect();
+  const x = Math.floor((e.clientX - rect.left) * (canvas.width  / rect.width));
+  const y = Math.floor((e.clientY - rect.top ) * (canvas.height / rect.height));
+  if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return;
+
+  let d;
+  try {
+    d = ctx.getImageData(x, y, 1, 1).data;
+  } catch (err) {
+    // 少数浏览器在 file:// 下会把画布判定为"被污染"，此时读不了像素
+    toast('这个浏览器不允许读取画面像素，请改用色盘取色');
+    return;
+  }
+  setBgRGB(d[0], d[1], d[2]);
+  onColorChanged();
+  toast('取到颜色 rgb(' + d[0] + ', ' + d[1] + ', ' + d[2] + ')');
+}
+
+/**
+ * 界面开关的持久化。
+ * 这几个控件不在 PARAM_DEFS 里（不是数值参数），所以合成一个 JSON 单独存。
+ */
+const LS_UI = 'av-image-shake-ui';
+const LS_BGSTYLE_OLD = 'av-image-shake-bgstyle';   // 旧版本用的键，读一次做迁移
+
+function loadUI() {
+  let o = {};
+  try { o = JSON.parse(localStorage.getItem(LS_UI) || '{}') || {}; } catch (e) { o = {}; }
+  // 迁移：老键里存过背景样式的话，优先采用
+  if (o.bgStyle === undefined) {
+    try {
+      const old = localStorage.getItem(LS_BGSTYLE_OLD);
+      if (old === 'solid' || old === 'radial') o.bgStyle = old;
+    } catch (e) { /* 忽略 */ }
+  }
+  if (o.bgStyle === 'solid' || o.bgStyle === 'radial') bgStyleSel.value = o.bgStyle;
+  if (typeof o.reflect === 'boolean') reflectChk.checked = o.reflect;
+  if (typeof o.shadow  === 'boolean') shadowChk.checked  = o.shadow;
+}
+
+function saveUI() {
+  try {
+    localStorage.setItem(LS_UI, JSON.stringify({
+      bgStyle: bgStyleSel.value,
+      reflect: reflectChk.checked,
+      shadow:  shadowChk.checked,
+    }));
+  } catch (e) { /* 忽略 */ }
+}
+
+/* ============================================================
+   2. 音频链路：AudioContext / AnalyserNode
+   ============================================================ */
+/**
+ * 建立音频分析链路。注意：
+ *  1) 浏览器自动播放策略要求 AudioContext 必须在「用户手势」回调里创建/恢复，
+ *     所以这里只应该在点击播放按钮时调用。
+ *  2) createMediaElementSource 对同一个 <audio> 元素只能调用一次，
+ *     所以用 srcNode 判空来做「只初始化一次」的保证。
+ */
+function ensureAudio() {
+  if (audioCtx) {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return;
+  }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) { toast('当前浏览器不支持 Web Audio API'); return; }
+
+  audioCtx = new AC();
+  srcNode  = audioCtx.createMediaElementSource(audio);
+
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 2048;              // 频率分辨率：sampleRate/2048 ≈ 21.5Hz 一格
+  analyser.smoothingTimeConstant = 0.7; // 节点内部的轻量平滑，进一步压掉毛刺
+  freqData = new Uint8Array(analyser.frequencyBinCount); // 1024 个频段
+
+  // 录制通道：把同样的音频另外送一路给 MediaRecorder，实现音画一起录
+  recDest = audioCtx.createMediaStreamDestination();
+
+  srcNode.connect(analyser);            // 音频 → 分析
+  analyser.connect(audioCtx.destination); // 分析 → 扬声器（不接这条就没声音）
+  srcNode.connect(recDest);             // 音频 → 录制出口
+
+  binRange = null;                      // 采样率确定后需要重算频段 bin 区间
+}
+
+/* ============================================================
+   3. 分析层：频谱 → 强度（本文件最核心的部分）
+   ============================================================ */
+
+/** 频段预设：[起始Hz, 结束Hz] */
+const BANDS = {
+  bass: [20, 250],
+  full: [20, 6000],
+  mid:  [800, 5000],
+};
+
+/**
+ * 读取当前频段的平均能量，返回 0~1 的原始值。
+ * 之所以取「平均」而不是「峰值」：峰值太跳，平均更接近人耳对低频量感的感知。
+ */
+function readBandEnergy() {
+  if (!binRange) {
+    const binHz = audioCtx.sampleRate / analyser.fftSize; // 每个 bin 代表多少 Hz
+    const [f0, f1] = BANDS[bandSel.value];
+    let i0 = Math.max(0, Math.floor(f0 / binHz));
+    let i1 = Math.min(freqData.length - 1, Math.ceil(f1 / binHz));
+    if (i1 < i0) i1 = i0;
+    binRange = [i0, i1];
+  }
+  let sum = 0, n = 0;
+  for (let i = binRange[0]; i <= binRange[1]; i++) { sum += freqData[i]; n++; }
+  return n ? (sum / n) / 255 : 0;   // Uint8 数据 → 0~1
+}
+
+/**
+ * 每帧更新包络。dt 为距上一帧的秒数，用来做「与帧率无关」的平滑，
+ * 否则同一份参数在 60Hz 和 144Hz 屏幕上手感完全不一样。
+ */
+function updateEnvelope(dt) {
+  let target = 0;
+
+  if (analyser && !audio.paused && !audio.ended) {
+    analyser.getByteFrequencyData(freqData);  // 把当前频谱填进 freqData
+
+    const raw = readBandEnergy();
+
+    // --- 自动增益(AGC)：不同音轨响度差很多，用近期峰值归一化，
+    //     这样换一首歌不用重新调灵敏度。agc 参数控制归一化程度(0=不归一化)。
+    agcPeak = Math.max(raw, agcPeak * Math.pow(0.999, dt * 60)); // 峰值缓慢衰减
+    if (agcPeak < 0.02) agcPeak = 0.02;                          // 防止把静音噪声放大
+    const norm = Math.min(1, raw / agcPeak);
+    target = raw * (1 - P.agc) + norm * P.agc;
+
+    // --- 灵敏度（增益）+ 噪声门：低于阈值的部分直接归零，避免静音段乱抖
+    target *= P.gain;
+    if (target < P.threshold) target = 0;
+    if (target > 1) target = 1;
+  }
+
+  // --- 非对称包络：上升用 attack，回落用 release，这是"弹跳感"的来源
+  const base = target > env ? P.attack : P.release;
+  const k = 1 - Math.pow(1 - base, dt * 60); // 帧率无关的插值系数
+  env += (target - env) * k;
+
+  // --- 手动冲击：把强度瞬间顶到 1，再自然回落
+  if (manualHit > 0) {
+    if (manualHit > env) env = manualHit;
+    manualHit *= Math.pow(0.93, dt * 60);
+    if (manualHit < 0.001) manualHit = 0;
+  }
+
+  if (env < 0) env = 0;
+  if (env > 1) env = 1;
+
+  // --- 记录历史（波浪模式要靠它做延迟取样）
+  history.push(env);
+  if (history.length > HISTORY_MAX) history.shift();
+}
+
+/* ------------------------------------------------------------
+   3.5 弹簧（弹性回缩的来源）
+
+   为什么需要它：如果直接令 位移 = -最大位移 × 强度，图片就是"瞬移到位、平静落回"，
+   没有惯性、没有回弹。改成让位移跟随一个二阶弹簧系统，就会自然产生：
+       冲上去 → 冲过头 → 落回来 → 再压过头（回缩）→ 几次衰减的摆动
+   这正是"弹性"的观感来源。
+
+   同时，弹簧还顺带给出了一样东西：速度。
+   挤压/拉伸（squash & stretch）就挂在速度上 —— 向上冲时拉长、回落时压扁。
+   ------------------------------------------------------------ */
+
+/** 由「弹性回弹」滑块推导二阶系统参数。updateSpring 和形变归一化共用这套系数 */
+function springCoeffs() {
+  // 频率与阻尼分开映射，这是两个独立的手感维度：
+  //   频率 ω → 起跳有多快。弹性调小也要保持"跟得紧"，所以 ω 起点很高(46)，
+  //            再随弹性下降，让强回弹时的摆动落在肉眼看得清的频率上而不是嗡嗡抖。
+  //   阻尼 ζ → 冲过头多少。1.0 = 临界阻尼(不回弹)，0.22 = 强回弹(过冲约 50%)。
+  const omega = 46 - P.spring * 16;      // 自然频率 46 ~ 30 rad/s
+  const zeta  = 1 - P.spring * 0.78;     // 阻尼比 1.00 ~ 0.22
+  return { omega: omega, zeta: zeta, k: omega * omega, c: 2 * zeta * omega };
+}
+
+/**
+ * 通用二阶弹簧积分（半隐式欧拉 + 固定子步长），返回 [新位置, 新速度]。
+ * 用固定小步长的两个理由：
+ *   1) 大 dt（比如切标签页回来）不会让数值发散；
+ *   2) 60Hz / 144Hz 屏幕上的手感一致。
+ * 单位无关：位置/速度可以是像素，也可以是无量纲的缩放系数。
+ */
+function springStep(y, v, dt, target, k, c) {
+  const H = 1 / 300;
+  let remain = Math.min(dt, 0.05);
+  while (remain > 1e-6) {
+    const h = Math.min(H, remain);
+    const a = (target - y) * k - v * c;   // 弹簧力 + 阻尼力
+    v += a * h;                           // 先更新速度
+    y += v * h;                           // 再用新速度更新位置
+    remain -= h;
+  }
+  if (!isFinite(y) || !isFinite(v)) return [target, 0]; // 数值兜底
+  return [y, v];
+}
+
+/** 位移弹簧：把"目标位移"变成带惯性的实际位移 */
+function updateSpring(dt, targetY) {
+  const { k, c } = springCoeffs();
+  const r = springStep(springY, springV, dt, targetY, k, c);
+  springY = r[0]; springV = r[1];
+
+  // --- 地面：允许略微"压进"地平线一点点，多了就挡住并吃掉向下速度，
+  //     这样落地那一下会有一个干脆的"墩"，而不是继续往下穿透。
+  const floorY = P.maxShift * 0.12;
+  if (springY > floorY) {
+    springY = floorY;
+    if (springV > 0) springV = 0;
+  }
+  // --- 上界：高弹性 + 大位移时别飞出去
+  const ceilY = -P.maxShift * 1.5;
+  if (springY < ceilY) {
+    springY = ceilY;
+    if (springV < 0) springV = 0;
+  }
+}
+
+/**
+ * 弹簧的目标幅度。
+ *
+ * 「原地伸缩」模式下位置根本不参与绘制，弹簧只当信号源用，
+ * 所以这里固定给一个基准幅度：否则「最大位移」被调成 0 时，弹簧目标恒为 0、
+ * 会彻底静止，连形变的信号源都一起被冻死。
+ */
+function springAmp() {
+  return modeSel.value === 'inplace' ? INPLACE_AMP : P.maxShift;
+}
+
+/* ============================================================
+   4. 渲染层
+   ============================================================ */
+
+/** 按 devicePixelRatio 调整 canvas 真实分辨率，并把坐标系统一成 CSS 像素 */
+function resize() {
+  const dpr = Math.min(2, window.devicePixelRatio || 1); // 限制到 2，避免 4K 屏上白烧 GPU
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width  = Math.max(1, Math.round(w * dpr));
+  canvas.height = Math.max(1, Math.round(h * dpr));
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // 之后所有绘制都用 CSS 像素坐标
+}
+
+/**
+ * 计算图片的摆放布局：等比缩放到画面内，底部落在"地平线"上。
+ * groundY 留出下方空间给倒影。
+ */
+function computeLayout() {
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+
+  // 图片尺寸异常（0 或非有限）时给一个安全的退化布局。
+  // 不这么兜的话，img.width=0 会让下面算出 Infinity，再 0*Infinity 得到 NaN，
+  // 而 NaN 是不声不响扩散的：`rx <= 1` 这种守卫对 NaN 恒为 false，根本拦不住。
+  const iw = img ? img.width : 0, ih = img ? img.height : 0;
+  if (!(iw > 0) || !(ih > 0) || !isFinite(iw) || !isFinite(ih)) {
+    return { W, H, cx: W / 2, groundY: H * 0.72, w: 0, h: 0 };
+  }
+
+  const maxW = W * 0.62, maxH = H * 0.50;
+  const s = Math.min(maxW / iw, maxH / ih);
+  return {
+    W, H,
+    cx: W / 2,          // 水平中心
+    groundY: H * 0.72,  // 地平线（图片底边默认位置）
+    w: iw * s,
+    h: ih * s,
+  };
+}
+
+/* ---- 背景色：色标集中定义，drawBackground 和 bgColorAt 共用同一份，
+       这样"倒影淡出的遮罩色"永远和实际背景对得上，不会因为改了渐变而错位。
+       默认底色 rgb(12,16,32) 配这组倍数，得到的就是原来那套 #161d33/#0c1020/#06070d。 ---- */
+const BG_STOPS    = [[0, 1.85], [0.55, 1.00], [1, 0.45]]; // [位置, 亮度倍数]
+const BG_RADIUS_K = 0.78;   // 渐变半径 = max(W,H) × 该系数
+const BG_CENTER   = [0.5, 0.55]; // 渐变中心（相对 W/H 的比例）
+
+/** 按倍数调整亮度并夹到 0~255。用乘法而不是向白色插值，因为乘法更能保住色相 */
+function mulRGB(c, k) {
+  return [
+    Math.max(0, Math.min(255, Math.round(c[0] * k))),
+    Math.max(0, Math.min(255, Math.round(c[1] * k))),
+    Math.max(0, Math.min(255, Math.round(c[2] * k))),
+  ];
+}
+function cssRGB(c) { return 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')'; }
+function rgbaCSS(c, a) { return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
+
+/** 当前背景色。滑块本身限定了 0~255，但 localStorage 里可能存着脏数据，所以夹一道 */
+function bgColor() {
+  return [
+    Math.max(0, Math.min(255, Math.round(P.bgR || 0))),
+    Math.max(0, Math.min(255, Math.round(P.bgG || 0))),
+    Math.max(0, Math.min(255, Math.round(P.bgB || 0))),
+  ];
+}
+
+/** 背景填充样式（径向渐变 / 纯色） */
+function bgFill(W, H) {
+  if (bgStyleSel.value === 'solid') return cssRGB(bgColor());
+  const c = bgColor();
+  const g = ctx.createRadialGradient(
+    W * BG_CENTER[0], H * BG_CENTER[1], 0,
+    W * BG_CENTER[0], H * BG_CENTER[1], Math.max(W, H) * BG_RADIUS_K);
+  for (const s of BG_STOPS) g.addColorStop(s[0], cssRGB(mulRGB(c, s[1])));
+  return g;
+}
+
+/**
+ * 采样屏幕上某一点的背景颜色。
+ * 用途：倒影的淡出遮罩必须用"该处背景的真实颜色"，否则白底上会出现一道黑边。
+ */
+function bgColorAt(x, y, W, H) {
+  const c = bgColor();
+  if (bgStyleSel.value === 'solid') return c;
+  const dx = x - W * BG_CENTER[0], dy = y - H * BG_CENTER[1];
+  const t = Math.min(1, Math.sqrt(dx * dx + dy * dy) / (Math.max(W, H) * BG_RADIUS_K));
+  // 在 BG_STOPS 之间线性插值出亮度倍数（canvas 的径向渐变也是分段线性的）
+  let k = BG_STOPS[BG_STOPS.length - 1][1];
+  for (let i = 1; i < BG_STOPS.length; i++) {
+    const p0 = BG_STOPS[i - 1][0], k0 = BG_STOPS[i - 1][1];
+    const p1 = BG_STOPS[i][0],     k1 = BG_STOPS[i][1];
+    if (t <= p1) { k = k0 + (k1 - k0) * ((t - p0) / (p1 - p0)); break; }
+  }
+  return mulRGB(c, k);
+}
+
+/** 背景是否偏亮 —— 决定提示文字用深色还是浅色 */
+function isLightBG() {
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  const c = bgColorAt(W / 2, H / 2, W, H);
+  return (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) > 150;
+}
+
+/** 画背景：默认径向渐变（中心稍亮，图片更有"悬浮感"），也可切成纯色 */
+function drawBackground(W, H) {
+  ctx.fillStyle = bgFill(W, H);
+  ctx.fillRect(0, 0, W, H);
+}
+
+/** 地面阴影：贴地越低越大越实，抬得越高越小越淡 —— 强化"腾空/砸地"的空间感 */
+function drawShadow(L, inten, baseY) {
+  const rx = L.w * 0.40 * (1 - 0.30 * inten);
+  const ry = Math.max(5, L.h * 0.032) * (1 - 0.45 * inten);
+  if (rx <= 1 || ry <= 0.5) return;
+  ctx.save();
+  ctx.translate(L.cx, baseY + 5);
+  ctx.scale(1, ry / rx);                       // 用一个圆形渐变压扁成椭圆
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+  g.addColorStop(0, 'rgba(0,0,0,' + (0.58 * (1 - 0.6 * inten)).toFixed(3) + ')');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(0, 0, rx, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+/** 光晕：在图片背后叠一层加亮混合的径向光，强度随音频变化 */
+function drawGlow(L, inten, st, a) {
+  if (P.glow <= 0 || inten <= 0.01) return;
+  // 图片中心：局部坐标的中心是 h*(a-0.5)，换算到屏幕坐标
+  const cy = L.groundY - L.h * a + st.offsetY + st.scaleY * L.h * (a - 0.5);
+  const R  = Math.max(L.w, L.h) * 0.9;
+  if (!(R > 0)) return;                       // 退化布局（尺寸为 0）时没必要画
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';   // 加亮混合，避免灰蒙蒙
+  const g = ctx.createRadialGradient(L.cx, cy, 0, L.cx, cy, R);
+  g.addColorStop(0,   'rgba(120,170,255,' + (0.26 * P.glow * inten).toFixed(3) + ')');
+  g.addColorStop(0.45,'rgba(80,110,255,'  + (0.10 * P.glow * inten).toFixed(3) + ')');
+  g.addColorStop(1,   'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, L.W, L.H);
+  ctx.restore();
+}
+
+/**
+ * 倒影：把图片沿地平线 y = groundY 做镜像，再用背景色渐变往下淡出。
+ *
+ * 镜像的数学是 M(y) = 2*groundY - y。主体绘制把局部 v 映射到
+ *   y = groundY - h*a + offsetY + scaleY*v
+ * 所以镜像的平移量必须是 groundY + h*a - offsetY（注意是 **减** offsetY：
+ * 图片抬高时倒影要往下降，跟图片同向位移是错的）。
+ */
+function drawReflection(L, st, a) {
+  const W = L.W, H = L.H;
+  ctx.save();
+  // 只允许在地平线以下绘制，避免倒影盖住主体
+  ctx.beginPath(); ctx.rect(0, L.groundY, W, H - L.groundY); ctx.clip();
+
+  ctx.globalAlpha = 0.22;
+  ctx.translate(L.cx, L.groundY + L.h * a - st.offsetY);
+  ctx.scale(st.scaleX, -st.scaleY);   // 负的 Y 缩放 = 上下镜像
+  ctx.rotate(-st.rot);
+  ctx.drawImage(img, -L.w / 2, -L.h * (1 - a), L.w, L.h);
+  ctx.restore();
+
+  // 淡出遮罩：逐点采样该处的背景色，只让 alpha 递增。
+  // 这样不管背景是黑、绿、蓝、白还是任意调的 RGB，倒影都能无缝融进背景。
+  const g = ctx.createLinearGradient(0, L.groundY, 0, H);
+  const N = 5;
+  for (let i = 0; i <= N; i++) {
+    const t = i / N;
+    const y = L.groundY + (H - L.groundY) * t;
+    g.addColorStop(t, rgbaCSS(bgColorAt(L.cx, y, W, H), (t * 0.98).toFixed(3)));
+  }
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, L.groundY, W, H - L.groundY); ctx.clip();
+  ctx.fillStyle = g; ctx.fillRect(0, L.groundY, W, H - L.groundY);
+  ctx.restore();
+}
+
+/**
+ * 逐行波浪模式：把图片切成若干横条，每条按「历史强度」的不同延迟取位移，
+ * 底部响应最快、顶部滞后 → 看起来像一道波从下往上穿过图片。
+ */
+function drawWave(L) {
+  const sliceSrcH = img.height / SLICES;   // 源图每条的高度
+  const sliceDstH = L.h / SLICES;          // 目标每条的高度
+  for (let i = 0; i < SLICES; i++) {
+    const p = i / (SLICES - 1);                        // 0 = 顶部, 1 = 底部
+    const delay = Math.round((1 - p) * WAVE_DELAY);    // 顶部滞后最多
+    const hi = Math.max(0, history.length - 1 - delay);
+    const h  = history.length ? (history[hi] || 0) : 0;
+    const oy = -P.maxShift * h;                        // 该条的垂直位移
+    const dw = L.w * (1 + P.stretch * 0.25 * h);       // 顺带做一点横向拉伸
+    ctx.drawImage(
+      img,
+      0, img.height * i / SLICES, img.width, sliceSrcH,   // 源矩形
+      L.cx - dw / 2, L.groundY - L.h + sliceDstH * i + oy, // 目标位置
+      dw, sliceDstH + 1                                    // +1 像素消除切片缝隙
+    );
+  }
+}
+
+/** 主绘制：先算出一个统一的变换状态 st，再分发给各个绘制函数 */
+function drawFrame(now) {
+  const L = computeLayout();
+  const inten = env;
+  const mode = modeSel.value;
+
+  drawBackground(L.W, L.H);
+
+  // ---- 由强度推导出「位移 / 形变 / 旋转」这三个量
+  const st = { offsetY: 0, scaleX: 1, scaleY: 1, rot: 0 };
+
+  // 伸缩锚点：0 = 底边固定(往上长)，0.5 = 中心固定(上下对称)，1 = 顶边固定(往下长)
+  // 它决定"高度变化时哪条边不动"，是「保证位置不变」这句话的具体含义。
+  const a = parseFloat(anchorSel.value) || 0;
+
+  if (mode === 'wave') {
+    // 波浪模式：整体偏移取当前强度（各切片的形变在 drawWave 里逐条处理）
+    st.offsetY = -P.maxShift * inten;
+
+  } else if (mode === 'inplace') {
+    /* ---- 原地伸缩：位移恒为 0，只有高度在变 ----
+       两个方向各取弹簧的一个信号，都是「弹性回缩」模式里已经在用的量：
+         伸长 ← 弹簧"抬起了多高"（位置信号；打击瞬间会过冲，所以会多长一截）
+         压缩 ← 弹簧"落得多快"（速度信号；回落越快压得越扁）
+
+       为什么要给压缩乘一个增益(RETRACT_GAIN)：压缩发生的时候图片往往还在高位，
+       伸长项还在起作用，两项相加会互相抵消，压下去的幅度会小到看不出来。
+       补偿一下，让"涨"和"缩"在画面上分量相当。 */
+    st.offsetY = 0;                                                  // ← 位置锁死
+    const stretchAmt = Math.max(0, -springY) / INPLACE_AMP;          // 抬起了多高
+    const retractAmt = Math.max(0,  springV) / REF_DOWN;             // 落得有多快
+    let dY = P.stretch * Math.min(1.2, stretchAmt)
+           - P.squash  * Math.min(1.4, retractAmt) * RETRACT_GAIN;
+    if (dY >  0.6) dY =  0.6;                                        // 别拉成一条线
+    if (dY < -0.6) dY = -0.6;                                        // 也别压成一张饼
+    st.scaleY = 1 + dY;
+    st.scaleX = 1 - dY * 0.35;   // 横向反向形变，原地伸缩时比位移模式更克制
+    st.rot = (P.rotate * Math.PI / 180) * inten * Math.sin(now * 0.006);
+
+  } else {
+    // 位移直接取弹簧的输出：它会冲过目标再回落，再压过头并来回摆几次
+    st.offsetY = springY;
+
+    if (mode === 'stretch') {
+      /* ---- 速度驱动的挤压 / 拉伸（Squash & Stretch）----
+         关键点：形变不看"位置"看"速度"。
+           向上冲 (springV < 0) → 竖直拉长，看起来被"拽"起来
+           回落中 (springV > 0) → 竖直压扁，看起来被"墩"回家（这就是回缩）
+         因为只看速度，所以静止时一定是原尺寸，不会一直胖着或扁着。
+
+         两个方向的参考速度不一样：回落速度天生比上升慢（上升被弹簧+音频一起推，
+         回落只靠弹簧自己松），若用同一个参考值，回缩量会只有拉伸量的一半、看不出来。
+         参考值取固定量级而不是跟最大位移挂钩，这样「最大位移」才能同时放大
+         位移和形变幅度 —— 否则两者会互相抵消，调了等于没调。              */
+      let up   = Math.max(0, -springV) / REF_UP;       // 向上冲的归一化强度
+      let down = Math.max(0,  springV) / REF_DOWN;     // 回落的归一化强度
+      if (up   > 1.4) up   = 1.4;                      // 夹住，避免爆音时糊成一团
+      if (down > 1.4) down = 1.4;
+
+      let dY = P.stretch * up        // 上升：拉长
+             - P.squash  * down;     // 回落：回缩（可独立调强）
+      // 上限保护：两个滑块都拉满时形变会夸张到失真，夹在 ±35%
+      if (dY >  0.35) dY =  0.35;
+      if (dY < -0.35) dY = -0.35;
+      st.scaleY = 1 + dY;
+      st.scaleX = 1 - dY * 0.55;                      // 反向形变，近似体积守恒
+
+      // 微旋转：仍由强度驱动，缓慢摆动，不做正负跳变（否则会闪）
+      st.rot = (P.rotate * Math.PI / 180) * inten * Math.sin(now * 0.006);
+    }
+    // 刚性跳跃模式：只取弹簧的位移（回弹过冲照样有），不做形变
+  }
+
+  // ---- 地面阴影（可开关）。关掉时连位置和抬升量一起不算，省掉每帧的三角计算。
+  if (shadowChk.checked) {
+    // 图片底边的实际屏幕 y：阴影要贴着它，不能永远钉在地平线上
+    const bottomY = L.groundY - L.h * a + st.offsetY + st.scaleY * L.h * a;
+    // 阴影跟的是"图片实际抬起了多高"，而不是音频强度：
+    // 这样落地那一下阴影会提前摊开、腾空时缩成一小团，空间感才对得上。
+    const lift = (mode === 'wave' || P.maxShift <= 0)
+      ? inten
+      : Math.max(0, Math.min(1, (L.groundY - bottomY) / P.maxShift));
+    drawShadow(L, lift, bottomY);
+  }
+  drawGlow(L, inten, st, a);
+
+  // ---- 画主体。以锚点(a)为原点做缩放，所以锚点那条边在屏幕上纹丝不动。
+  if (mode === 'wave') {
+    drawWave(L);
+  } else {
+    ctx.save();
+    ctx.translate(L.cx, L.groundY - L.h * a + st.offsetY); // 锚点：高度上 a 处
+    ctx.scale(st.scaleX, st.scaleY);
+    ctx.rotate(st.rot);
+    ctx.drawImage(img, -L.w / 2, -L.h * (1 - a), L.w, L.h); // 以锚点为原点的绘制
+    ctx.restore();
+  }
+
+  // ---- 倒影（可开关）。关掉时连同淡出遮罩一起跳过：
+  //      遮罩画的本来就是背景色，不画等于省下一次全宽渐变填充。
+  if (reflectChk.checked) drawReflection(L, st, a);
+}
+
+/** 还没导入图片时的引导文字（颜色按背景明暗自适应） */
+function drawHint() {
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.fillStyle = isLightBG() ? 'rgba(20,26,40,.62)' : 'rgba(200,215,240,.55)';
+  ctx.font = '16px "Segoe UI", "Microsoft YaHei", sans-serif';
+  ctx.fillText('点击左上角「导入图片」和「导入音频」，或直接把文件拖进窗口', W / 2, H / 2);
+  ctx.restore();
+}
+
+/* ============================================================
+   5. 主循环
+   ============================================================ */
+let lastT = performance.now();
+let fpsAcc = 0, fpsCnt = 0;
+let renderErrCount = 0;   // 渲染异常计数：只提示第一次，避免刷屏
+
+function loop(now) {
+  // dt 限制在 50ms 以内：切标签页回来时不会因为超大 dt 导致包络瞬间跳变
+  const dt = Math.min(0.05, (now - lastT) / 1000);
+  lastT = now;
+
+  updateEnvelope(dt);
+  // 弹簧的目标位置 = 包络对应的位移；弹簧负责把"瞬间到位"变成"带惯性的回弹"
+  updateSpring(dt, -springAmp() * env);
+
+  /* 一次渲染异常绝对不能把整个动画循环打死。
+     loop 末尾那句 requestAnimationFrame(loop) 才是续命的关键 ——
+     如果 drawFrame 抛异常，那句就永远执行不到，画面会永久卡死而且毫无提示。
+     所以这里兜住异常、继续排下一帧。 */
+  try {
+    if (img) drawFrame(now);
+    else { drawBackground(canvas.clientWidth, canvas.clientHeight); drawHint(); }
+  } catch (err) {
+    if (renderErrCount++ === 0) {
+      console.error('渲染出错，已跳过该帧：', err);
+      toast('渲染出错，已跳过该帧（详见控制台）');
+    }
+  }
+
+  updateHud(dt);
+  requestAnimationFrame(loop);
+}
+
+/** 刷新能量表 / 帧率 / 进度条 */
+function updateHud(dt) {
+  meterEl.style.width = (env * 100).toFixed(1) + '%';
+
+  // 帧率：每 0.5 秒统计一次，避免数字乱跳
+  fpsAcc += dt; fpsCnt++;
+  if (fpsAcc >= 0.5) {
+    fpsEl.textContent = Math.round(fpsCnt / fpsAcc) + ' fps';
+    fpsAcc = 0; fpsCnt = 0;
+  }
+
+  // 进度条（用户正在拖动时不要抢回控制权）
+  if (!dragging && isFinite(audio.duration)) {
+    seekEl.value = (audio.currentTime / audio.duration) * 100 || 0;
+    tNowEl.textContent = timeStr(audio.currentTime);
+  }
+}
+
+function timeStr(s) {
+  if (!isFinite(s)) return '00:00';
+  const m = Math.floor(s / 60), r = Math.floor(s % 60);
+  return String(m).padStart(2, '0') + ':' + String(r).padStart(2, '0');
+}
+
+/* ============================================================
+   6. 交互：导入 / 播放 / 录制 / 快捷键
+   ============================================================ */
+const fileImg = document.getElementById('fileImg');
+const fileAudio = document.getElementById('fileAudio');
+
+document.getElementById('btnImg').onclick   = () => fileImg.click();
+document.getElementById('btnAudio').onclick = () => fileAudio.click();
+
+/**
+ * 导入图片：createImageBitmap 最快；不支持时退回 <img> + objectURL。
+ *
+ * 关键：必须"先把新图解好，再换上去，最后才关旧图"。
+ * 反过来写（先 close 旧图、再 await 新图）会留出一段空窗：
+ * 这段空窗里 rAF 会照常跑，而 img 指向的已是一张被 close 过的 ImageBitmap
+ * —— 它的 width/height 会变成 0（Chrome 不报错，静默变 0），
+ * 于是 computeLayout 里 0 * Infinity 得到 NaN，NaN 一路传到
+ * createRadialGradient 才抛 TypeError。这个换图动作是同步的，不留空窗。
+ */
+async function loadImage(file) {
+  if (!file || !file.type.startsWith('image/')) { toast('请选择图片文件'); return; }
+
+  let next;
+  try {
+    next = await createImageBitmap(file);
+  } catch (e) {
+    next = await new Promise((res, rej) => {
+      const im = new Image();
+      im.onload = () => res(im);
+      im.onerror = rej;
+      im.src = URL.createObjectURL(file);
+    });
+  }
+
+  const old = img;
+  img = next;                        // 先换上新图（同步完成，rAF 插不进来）
+  if (old && old.close) old.close(); // 再释放旧图的显存
+  toast('图片已导入：' + file.name);
+}
+
+/* ---------- 音源文件的识别与校验 ---------- */
+
+/* 扩展名兜底：有些系统不认扩展名，file.type 会是空字符串，
+   光靠 MIME 判断连正常的 MP3 都会被拒。 */
+const EXT_AUDIO = /\.(mp3|wav|wave|flac|aac|m4a|ogg|oga|opus|aif|aiff|wma)$/i;
+const EXT_VIDEO = /\.(mp4|m4v|mov|webm)$/i;
+/* 浏览器确定解不了的容器，提前拒掉 —— 否则会先弹"测试功能"警告、再解码失败，白折腾一趟 */
+const EXT_UNSUPPORTED = /\.(mkv|avi|flv|wmv|rmvb|rm|ts|m2ts|vob|3gp)$/i;
+
+/**
+ * 判断文件能不能当音源用。返回 'audio' / 'video' / null（不支持）。
+ * 视频文件之所以能用，是因为我们只取它的音轨 —— MP4 本质是个容器，
+ * <audio> 元素完全可以只播里面的 AAC 音轨，再把音频接进 Web Audio。
+ */
+function mediaKind(file) {
+  if (!file) return null;
+  const n = file.name || '';
+  if (EXT_UNSUPPORTED.test(n)) return null;
+  const t = (file.type || '').toLowerCase();
+  if (t.startsWith('audio/')) return 'audio';
+  if (t.startsWith('video/')) return 'video';
+  // file.type 可能是空串（系统不认扩展名时），所以再用扩展名兜一层
+  if (EXT_AUDIO.test(n)) return 'audio';
+  if (EXT_VIDEO.test(n)) return 'video';
+  return null;
+}
+
+/** 把 MediaError 翻译成人能看懂的原因 */
+function mediaErrText(err) {
+  if (!err) return '未知错误';
+  switch (err.code) {
+    case 1: return '加载被中止';
+    case 2: return '读取文件失败';
+    case 3: return '解码失败——这个文件的音轨编码浏览器可能不支持（如 AC-3 / DTS / ALAC）';
+    case 4: return '格式不支持——容器或编码不被浏览器接受';
+    default: return '错误码 ' + err.code;
+  }
+}
+
+/**
+ * 等音频元数据就绪，或者等它报错。
+ * 必须做这一步：没有音轨的视频（比如关掉麦克风的录屏）加载不会报错，
+ * 但一直是静音、频谱恒为 0，看起来就像程序坏了，不主动检测根本查不出原因。
+ */
+function waitForAudioReady(el, timeoutMs) {
+  return new Promise(resolve => {
+    if (el.error) { resolve({ ok: false, reason: mediaErrText(el.error) }); return; }
+    // 有些流媒体没有有限时长，所以 duration 为 Infinity 也算正常
+    if (el.readyState >= 1 && (el.duration > 0 || el.duration === Infinity)) {
+      resolve({ ok: true }); return;
+    }
+
+    let settled = false;
+    const finish = r => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      el.removeEventListener('loadedmetadata', onOk);
+      el.removeEventListener('error', onErr);
+      resolve(r);
+    };
+    const onOk = () => finish({ ok: true });
+    const onErr = () => finish({ ok: false, reason: mediaErrText(el.error) });
+    const timer = setTimeout(() => finish({ ok: false, reason: '读取超时' }), timeoutMs || 10000);
+
+    el.addEventListener('loadedmetadata', onOk);
+    el.addEventListener('error', onErr);
+  });
+}
+
+/** 导入音源：音频文件或视频文件的音轨，都交给 <audio> 元素解码 */async function loadAudio(file) {
+  const kind = mediaKind(file);
+  if (!kind) {
+    toast('不支持的格式，请用音频文件，或 MP4 / MOV / WebM 视频');
+    return;
+  }
+  // 从视频取音频属于测试功能，先明确告知
+  if (kind === 'video') showVideoBetaWarn();
+
+  if (audio.src) URL.revokeObjectURL(audio.src); // 释放上一个 blob URL
+  audio.src = URL.createObjectURL(file);
+  audio.load();
+
+  binRange = null;
+  agcPeak  = 0.02;
+  env = 0; history.length = 0;
+  springY = 0; springV = 0;   // 弹簧也要复位，否则换歌瞬间会有一次莫名的回弹
+  tAllEl.textContent = '00:00';
+
+  const r = await waitForAudioReady(audio, 10000);
+  if (!r.ok) {
+    toast('读取失败：' + r.reason);
+    return;
+  }
+  toast((kind === 'video' ? '已取到视频音轨：' : '音频已导入：') + file.name);
+}
+
+fileImg.onchange   = e => { if (e.target.files[0]) loadImage(e.target.files[0]); fileImg.value = ''; };
+fileAudio.onchange = e => { if (e.target.files[0]) loadAudio(e.target.files[0]); fileAudio.value = ''; };
+
+/** 播放 / 暂停（第一次播放时才创建 AudioContext，满足自动播放策略） */
+async function togglePlay() {
+  if (!audio.src) { toast('先导入一个音频文件'); return; }
+  ensureAudio();
+  if (audio.paused) {
+    try { await audio.play(); } catch (e) { toast('播放失败：' + e.message); }
+  } else {
+    audio.pause();
+  }
+  syncPlayBtn();
+}
+function syncPlayBtn() {
+  const b = document.getElementById('btnPlay');
+  b.textContent = audio.paused ? '▶ 播放' : '⏸ 暂停';
+}
+
+document.getElementById('btnPlay').onclick = togglePlay;
+
+// 手动冲击：不依赖音频，方便在暂停状态下对着参数调手感。
+// 吸管取色模式下，点击画面的含义变成"取色"，此时不触发冲击。
+document.getElementById('btnHit').onclick = () => { manualHit = 1; };
+canvas.addEventListener('pointerdown', e => {
+  if (picking) { pickColorAt(e); return; }
+  manualHit = 1;
+});
+
+/* ---------- 色盘 ---------- */
+document.getElementById('btnWheel').onclick = () => {
+  const willOpen = wheelBox.hidden;
+  wheelBox.hidden = !willOpen;
+  document.getElementById('btnWheel').classList.toggle('on', willOpen);
+  if (willOpen) {
+    ensureWheel();          // 底图现算，不打开就不花这个时间
+    syncWheelFromRGB();
+    drawWheel();
+  }
+};
+
+// 在色盘上按下并拖动都能连续取色
+let wheelDragging = false;
+wheelCanvas.addEventListener('pointerdown', e => {
+  wheelDragging = true;
+  wheelCanvas.setPointerCapture(e.pointerId);   // 拖出圆外也不丢事件
+  wheelSetFromPointer(e);
+});
+wheelCanvas.addEventListener('pointermove', e => { if (wheelDragging) wheelSetFromPointer(e); });
+wheelCanvas.addEventListener('pointerup',     () => { wheelDragging = false; });
+wheelCanvas.addEventListener('pointercancel', () => { wheelDragging = false; });
+
+// 明度滑条 + 数字框
+valRange.addEventListener('input', () => {
+  wheelV = parseFloat(valRange.value) / 100;
+  valNum.value = valRange.value;
+  applyWheelColor();
+});
+valNum.addEventListener('input', () => {
+  const v = parseFloat(valNum.value);
+  if (!isFinite(v)) return;
+  wheelV = Math.max(0, Math.min(100, v)) / 100;
+  valRange.value = Math.round(wheelV * 100);
+  applyWheelColor();
+});
+valNum.addEventListener('change', () => { valNum.value = Math.round(wheelV * 100); });
+valNum.addEventListener('blur',   () => { valNum.value = Math.round(wheelV * 100); });
+
+/* ---------- 吸管 ---------- */
+document.getElementById('btnPick').onclick = () => setPicking(!picking);
+
+document.getElementById('btnReset').onclick = resetParams;
+document.getElementById('btnResetBg').onclick = resetBgColor;
+
+/** 面板折叠：左右两个面板共用同一套逻辑 */
+function setupFold(panelEl, btnEl) {
+  btnEl.onclick = () => {
+    panelEl.classList.toggle('collapsed');
+    btnEl.textContent = panelEl.classList.contains('collapsed') ? '展开' : '收起';
+  };
+}
+setupFold(panel, document.getElementById('btnFold'));
+setupFold(document.getElementById('colorPanel'), document.getElementById('btnFoldColor'));
+
+/* ---------- 手机端底部标签切换 ----------
+   桌面端标签栏是隐藏的，面板始终显示，所以这里加的 m-open 类在桌面上不起作用。 */
+let activeTab = null;
+function setTab(name) {
+  // 再点一次当前标签 = 收起抽屉，把整个画面让出来看效果
+  activeTab = (activeTab === name) ? null : name;
+  panel.classList.toggle('m-open', activeTab === 'settings');
+  document.getElementById('colorPanel').classList.toggle('m-open', activeTab === 'color');
+  document.body.classList.toggle('sheet-open', activeTab !== null);
+  for (const b of tabbarEl.children) b.classList.toggle('on', b.dataset.tab === activeTab);
+}
+for (const b of tabbarEl.children) b.addEventListener('click', () => setTab(b.dataset.tab));
+
+/* ---------- 顶部制作信息下拉栏 ---------- */
+// 版本号从 APP_VERSION 单一来源注入，避免 HTML 和脚本里各写一份对不上
+document.getElementById('creditsVersion').textContent = '版本 ' + APP_VERSION;
+
+function setCredits(open) {
+  creditsEl.classList.toggle('open', open);
+  creditsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+creditsBtn.onclick = () => setCredits(!creditsEl.classList.contains('open'));
+
+// 点到别处自动收起（点画布时顺带也会触发手动冲击，这是符合直觉的）
+document.addEventListener('pointerdown', e => {
+  if (creditsEl.classList.contains('open') && !creditsEl.contains(e.target)) setCredits(false);
+});
+
+// 频段切换后需要重算 bin 区间
+bandSel.onchange = () => { binRange = null; };
+
+// 背景样式切换
+bgStyleSel.onchange = saveUI;
+
+// 倒影 / 阴影开关
+reflectChk.onchange = saveUI;
+shadowChk.onchange  = saveUI;
+
+/**
+ * 模式切换时同步 UI：「原地伸缩」不做位移，「最大位移」那一格就没有意义了，
+ * 直接禁用并调暗，免得对着一个不生效的滑块白调半天。
+ * 同时「伸缩锚点」只在会形变的模式（原地伸缩 / 弹性回缩）下才起作用。
+ */
+function syncModeUI() {
+  const mode = modeSel.value;
+  const shiftRow = slidersEl.querySelector('[data-key="maxShift"]');
+  const shiftInput = shiftRow && shiftRow.querySelector('input');
+  const shiftOff = (mode === 'inplace' || mode === 'wave');
+
+  if (shiftInput) {
+    shiftInput.disabled = shiftOff;
+    shiftRow.style.opacity = shiftOff ? '0.38' : '1';
+    shiftRow.title = shiftOff ? '该模式下不做位移，此项不生效' : '';
+  }
+  // 波浪模式是逐条切片位移，锚点不参与
+  anchorSel.disabled = (mode === 'wave' || mode === 'jump');
+  anchorSel.style.opacity = (mode === 'wave' || mode === 'jump') ? '0.38' : '1';
+}
+modeSel.onchange = syncModeUI;
+
+// 进度条拖动
+seekEl.addEventListener('pointerdown', () => dragging = true);
+seekEl.addEventListener('pointerup',   () => dragging = false);
+seekEl.addEventListener('input', () => {
+  if (isFinite(audio.duration)) {
+    audio.currentTime = (parseFloat(seekEl.value) / 100) * audio.duration;
+    tNowEl.textContent = timeStr(audio.currentTime);
+  }
+});
+
+audio.addEventListener('loadedmetadata', () => { tAllEl.textContent = timeStr(audio.duration); });
+audio.addEventListener('play',  syncPlayBtn);
+audio.addEventListener('pause', syncPlayBtn);
+audio.addEventListener('ended', () => { syncPlayBtn(); manualHit = 0; });
+
+// 快捷键
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' && e.target.type !== 'range') return;
+  if (e.code === 'Escape') {
+    // Esc 依次处理：先关警告框，再取消取色，最后收起制作信息
+    if (!warnMask.hidden) { hideVideoBetaWarn(); return; }
+    if (picking) { setPicking(false); return; }
+    if (creditsEl.classList.contains('open')) { setCredits(false); return; }
+  }
+  if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+  else if (e.key === 'k' || e.key === 'K') { manualHit = 1; }
+  else if (e.key === 'h' || e.key === 'H') {
+    // H 一键收起 / 展开左右两侧面板
+    document.getElementById('btnFold').click();
+    document.getElementById('btnFoldColor').click();
+  }
+});
+
+/* ---------- 拖拽导入 ---------- */
+let dragDepth = 0;
+window.addEventListener('dragenter', e => { e.preventDefault(); dragDepth++; dropMask.classList.add('on'); });
+window.addEventListener('dragover',  e => e.preventDefault());
+window.addEventListener('dragleave', e => { if (--dragDepth <= 0) { dragDepth = 0; dropMask.classList.remove('on'); } });
+window.addEventListener('drop', e => {
+  e.preventDefault(); dragDepth = 0; dropMask.classList.remove('on');
+  const f = e.dataTransfer.files[0];
+  if (!f) return;
+  if (f.type.startsWith('image/')) loadImage(f);
+  else if (mediaKind(f)) loadAudio(f);
+  else toast('只支持图片、音频，或 MP4 / MOV / WebM 视频');
+});
+
+/* ============================================================
+   7. 导出：canvas 画面 + 音频轨 → 视频文件
+
+   格式策略：优先 MP4，不支持则自动退 WebM。
+   两者都是浏览器「内置编码器」直接录，不需要装任何东西，别人打开也能用。
+     MP4  = H.264 + AAC   —— Chrome(较新)/Safari 支持，通用性最好
+     WebM = VP9/VP8 + Opus —— Firefox 以及老版本 Chrome 的兜底
+   最终录到哪个格式，看开始录制时提示条上写的是哪个。
+   ============================================================ */
+
+/** 按优先级排列的候选格式。前面的不支持就往后试 */
+const REC_CANDIDATES = [
+  'video/mp4;codecs=avc1.42E01E,mp4a.40.2', // H.264 Baseline + AAC-LC，兼容性最好的一对
+  'video/mp4;codecs=avc1,mp4a',
+  'video/mp4;codecs=h264,aac',
+  'video/mp4',
+  'video/webm;codecs=vp9,opus',
+  'video/webm;codecs=vp8,opus',
+  'video/webm',
+];
+
+let recMime = '';   // 本次录制实际用的格式，onstop 里据此决定扩展名
+
+/**
+ * 挑一个能用的录制格式，返回 { rec, mime }。
+ * mime 是我们实际拿去构造的候选串（空串 = 全部候选都不可用，交给浏览器自选）。
+ *
+ * 为什么不只用 isTypeSupported 判断：有些浏览器它返回 true，
+ * 真去 new MediaRecorder 却抛异常。所以这里直接拿真实构造来试，最可靠。
+ *
+ * 为什么要一并返回 mime：MediaRecorder.mimeType 理论上会回显实际格式，
+ * 但不是所有浏览器都回显。万一它返回空串，我们必须知道刚才用的是哪个候选，
+ * 否则会出现"录出来是 MP4、文件名却写成 .webm"这种错。
+ */
+function pickRecorder(stream, opts) {
+  for (const cand of REC_CANDIDATES) {
+    // isTypeSupported 在个别老浏览器里不存在，缺失时跳过预检、直接构造试探
+    if (typeof MediaRecorder.isTypeSupported === 'function' &&
+        !MediaRecorder.isTypeSupported(cand)) continue;
+    try {
+      return { rec: new MediaRecorder(stream, Object.assign({ mimeType: cand }, opts)), mime: cand };
+    } catch (e) { /* 这个格式不行，试下一个 */ }
+  }
+  try { return { rec: new MediaRecorder(stream, opts), mime: '' }; } catch (e) { return null; }
+}
+
+document.getElementById('btnRec').onclick = () => {
+  if (recording) { recording.stop(); return; }
+  if (!img) { toast('先导入图片再录制'); return; }
+  if (typeof MediaRecorder === 'undefined') { toast('当前浏览器不支持 MediaRecorder'); return; }
+
+  ensureAudio();
+
+  // 视频轨来自 canvas 的实时画面；音频轨来自 AudioContext 的录制出口
+  const tracks = [...canvas.captureStream(60).getVideoTracks()];
+  const audioTracks = recDest ? recDest.stream.getAudioTracks() : [];
+  tracks.push(...audioTracks);
+
+  // 目标是清晰度优先：视频 8 Mbps；只有确实有音频轨时才设音频码率
+  const opts = { videoBitsPerSecond: 8000000 };
+  if (audioTracks.length) opts.audioBitsPerSecond = 192000;
+
+  const picked = pickRecorder(new MediaStream(tracks), opts);
+  if (!picked) { toast('无法开始录制：当前浏览器不支持'); return; }
+  recording = picked.rec;
+
+  // 优先采信浏览器回显的实际格式；它不回显就退回我们构造时用的候选串
+  recMime = (recording.mimeType || picked.mime || '').toLowerCase();
+  const isMp4 = recMime.indexOf('mp4') >= 0;
+  const ext = isMp4 ? 'mp4' : 'webm';
+
+  recChunks = [];
+  recording.ondataavailable = e => { if (e.data && e.data.size) recChunks.push(e.data); };
+  recording.onstop = () => {
+    download(new Blob(recChunks, { type: recMime || 'video/webm' }),
+             'shake-' + Date.now() + '.' + ext);
+    recording = null; recChunks = [];
+    document.getElementById('btnRec').classList.remove('on');
+    document.getElementById('btnRec').textContent = '● 录制';
+    toast('录制完成：' + ext.toUpperCase() + '，已开始下载');
+  };
+  recording.start();
+  document.getElementById('btnRec').classList.add('on');
+  document.getElementById('btnRec').textContent = '■ 停止';
+  toast('录制中（' + ext.toUpperCase() + '）…再点一次停止；需要音频正在播放才有声音');
+};
+
+function download(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+
+/* ============================================================
+   8. 杂项与启动
+   ============================================================ */
+
+/* ---------- 参数说明气泡 ----------
+   用事件委托统一处理所有 ⓘ 图标，避免给每个图标单独绑事件。 */
+let tipTimer = 0;
+let tipOwner = null;   // 当前气泡是给哪个图标显示的
+
+function showTip(icon) {
+  const text = icon.dataset.tip;
+  if (!text) return;
+  tipEl.textContent = text;
+  tipOwner = icon;
+
+  const r = icon.getBoundingClientRect();
+  const t = tipEl.getBoundingClientRect();     // opacity:0 也有布局，可以直接量
+
+  // 优先放图标右侧；右边放不下就翻到左侧
+  let x = r.right + 10;
+  if (x + t.width > innerWidth - 8) x = r.left - t.width - 10;
+  x = Math.max(8, Math.min(x, innerWidth - t.width - 8));
+
+  // 垂直方向对齐图标中心，并夹在视口内
+  let y = r.top + r.height / 2 - t.height / 2;
+  y = Math.max(8, Math.min(y, innerHeight - t.height - 8));
+
+  tipEl.style.left = x + 'px';
+  tipEl.style.top  = y + 'px';
+  tipEl.classList.add('on');
+}
+
+function hideTip() {
+  clearTimeout(tipTimer);
+  tipTimer = 0;
+  tipOwner = null;
+  tipEl.classList.remove('on');
+}
+
+/** 稍微延迟一点再弹，鼠标快速划过时不会刷屏式闪现 */
+function scheduleTip(icon) {
+  clearTimeout(tipTimer);
+  tipTimer = setTimeout(() => showTip(icon), 90);
+}
+
+document.addEventListener('mouseover', e => {
+  const icon = e.target.closest && e.target.closest('.info');
+  if (icon) scheduleTip(icon);
+});
+document.addEventListener('mouseout', e => {
+  if (e.target.closest && e.target.closest('.info')) hideTip();
+});
+// 键盘 Tab 到图标时也要能看到说明
+document.addEventListener('focusin',  e => {
+  if (e.target.classList && e.target.classList.contains('info')) showTip(e.target);
+});
+document.addEventListener('focusout', e => {
+  if (e.target.classList && e.target.classList.contains('info')) hideTip();
+});
+// 气泡是 fixed 定位，面板一滚它就悬在错位置了，所以滚动时直接收起
+window.addEventListener('scroll', hideTip, true);
+
+/* 点击处理：
+   触摸设备没有 hover，所以点图标 = 切换说明的显示/隐藏；
+   鼠标设备交给 mouseover 处理，点图标本身不切换（否则会和 hover 打架）。 */
+document.addEventListener('pointerdown', e => {
+  const icon = e.target.closest && e.target.closest('.info');
+  if (!icon) { hideTip(); return; }
+  if (e.pointerType === 'mouse') { hideTip(); return; }
+  if (tipOwner === icon && tipEl.classList.contains('on')) hideTip();
+  else showTip(icon);
+});
+
+/* ---------- 测试功能的警告框 ---------- */
+function showVideoBetaWarn() {
+  warnMask.hidden = false;
+  warnOk.focus();          // 让键盘直接可用，回车即可关掉
+}
+function hideVideoBetaWarn() {
+  warnMask.hidden = true;
+}
+warnOk.onclick = hideVideoBetaWarn;
+// 点遮罩空白处也关掉（但点框内部不关）
+warnMask.addEventListener('pointerdown', e => {
+  if (e.target === warnMask) hideVideoBetaWarn();
+});
+
+let toastTimer = 0;
+function toast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2200);
+}
+
+// 窗口尺寸变化时重设分辨率；同时用 ResizeObserver 覆盖"面板收起"等布局变化
+window.addEventListener('resize', resize);
+if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas);
+
+loadParams();
+loadUI();
+buildPresets();   // 必须先于 buildSliders：滑块构造时会调用 refreshBgUI
+buildSliders();
+refreshBgUI();
+syncWheelFromRGB();   // 让色盘的初始状态和存下来的背景色一致
+syncModeUI();   // 按当前模式决定哪些控件该禁用
+resize();
+syncPlayBtn();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
