@@ -162,16 +162,16 @@
   .hud { display: flex; justify-content: space-between; font-size: 11px; color: #8798b5; font-variant-numeric: tabular-nums; }
   .tips { font-size: 11px; color: #74849f; line-height: 1.55; margin-top: 9px; }
 
-  /* ---------- 测试功能警告框 ---------- */
-  #warnMask {
+  /* ---------- 通用弹层（测试功能警告 / 录制保存，共用一套外观） ---------- */
+  .modal {
     position: fixed; inset: 0; z-index: 90;
     display: flex; align-items: center; justify-content: center;
     background: rgba(4, 7, 14, .62);
     backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
   }
   /* 上面写了 display:flex，会盖掉 hidden 属性自带的 display:none，所以必须补这一条 */
-  #warnMask[hidden] { display: none; }
-  #warnBox {
+  .modal[hidden] { display: none; }
+  .modal-box {
     width: min(370px, calc(100vw - 40px));
     padding: 16px 18px 15px;
     background: rgba(22, 28, 44, .98);
@@ -182,19 +182,55 @@
     font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
     user-select: none;
   }
-  #warnTitle { font-size: 13.5px; font-weight: 600; color: #ffcf7a; margin-bottom: 9px; }
-  #warnBox p { margin: 0 0 8px; }
-  #warnBox p:last-of-type { margin-bottom: 0; }
-  #warnBox .dim { color: #93a2bd; font-size: 11.5px; }
-  #warnBox b { color: #ffe1ad; font-weight: 600; }
-  #warnOk {
-    all: unset; display: block; margin: 14px auto 0; cursor: pointer;
-    padding: 7px 24px; border-radius: 8px; font-size: 12px; text-align: center;
+  /* 录制保存框用蓝色调，和警告框的琥珀色区分开 */
+  #saveBox { border-color: rgba(110, 168, 255, .42); }
+  #saveTitle { font-size: 13.5px; font-weight: 600; color: #9ec8ff; margin-bottom: 9px; }
+  .modal-title { font-size: 13.5px; font-weight: 600; color: #ffcf7a; margin-bottom: 9px; }
+  .modal-box p { margin: 0 0 8px; }
+  .modal-box p:last-of-type { margin-bottom: 0; }
+  .modal-box .dim { color: #93a2bd; font-size: 11.5px; }
+  .modal-box b { color: #ffe1ad; font-weight: 600; }
+  .modal-btn {
+    all: unset; cursor: pointer; text-align: center;
+    padding: 8px 20px; border-radius: 8px; font-size: 12px;
     background: rgba(110, 168, 255, .18);
     border: 1px solid rgba(110, 168, 255, .4);
     color: #cfe1ff; transition: background .15s;
   }
-  #warnOk:hover { background: rgba(110, 168, 255, .34); }
+  .modal-btn:hover { background: rgba(110, 168, 255, .34); }
+  #warnOk { display: block; margin: 14px auto 0; padding: 7px 24px; }
+  #saveRow, .modal-row { display: flex; gap: 8px; margin-top: 14px; }
+  #saveRow .modal-btn, .modal-row .modal-btn { flex: 1; }
+  .modal-btn.primary { background: rgba(110, 200, 140, .18); border-color: rgba(110, 200, 140, .45); color: #b8f0cc; }
+  .modal-btn.primary:hover { background: rgba(110, 200, 140, .34); }
+  #saveRow #saveAlbum { background: rgba(110, 200, 140, .18); border-color: rgba(110, 200, 140, .45); color: #b8f0cc; }
+  #saveRow #saveAlbum:hover { background: rgba(110, 200, 140, .34); }
+  /* GIF 时间轴：一条轨道 + 一段高亮选区 */
+  #tlWrap {
+    position: relative; height: 24px; margin: 10px 0 2px;
+    border-radius: 6px; background: rgba(255, 255, 255, .08);
+    overflow: hidden;
+  }
+  #tlSel {
+    position: absolute; top: 0; bottom: 0;
+    background: rgba(110, 168, 255, .32);
+    border-left: 2px solid #6ea8ff; border-right: 2px solid #6ea8ff;
+    box-sizing: border-box;
+  }
+  #tlTick {
+    position: absolute; top: 0; bottom: 0; width: 2px;
+    background: rgba(255, 120, 120, .85); display: none;
+  }
+  .tl-lab b { font-variant-numeric: tabular-nums; }
+
+  /* GIF 预览 */
+  #gifImg {
+    display: block; margin: 10px auto 0; max-width: 100%; max-height: 46vh;
+    border-radius: 8px; background: #0a0e18;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, .12);
+  }
+  #gifBar { height: 4px; border-radius: 2px; background: rgba(255,255,255,.12); overflow: hidden; margin-top: 10px; }
+  #gifBarIn { height: 100%; width: 0%; background: linear-gradient(90deg,#3f7dff,#6ee7ff); transition: width .1s linear; }
 
   /* ---------- 参数说明气泡 ----------
      单独挂到 body 上、用 fixed 定位：面板本身是 overflow-y:auto，
@@ -345,6 +381,7 @@
     select { padding: 9px 8px; font-size: 13px; }
     .btn { padding: 11px 8px; font-size: 13px; }
     #warnOk { padding: 11px 26px; font-size: 13px; }
+    .modal-btn { padding: 12px 20px; font-size: 13px; }
     #bgPreview, #wheelPreview { width: 62px; height: 22px; }
 
     /* 提示条要抬到标签栏上面，否则被压住 */
@@ -387,6 +424,10 @@
       <div class="btn" id="btnRec">● 录制</div>
     </div>
 
+    <div class="row">
+      <div class="btn" id="btnGif">保存为 GIF 动图</div>
+    </div>
+
     <input type="range" id="seek" min="0" max="100" step="0.01" value="0">
     <div class="hud"><span id="tNow">00:00</span><span id="tAll">00:00</span></div>
 
@@ -410,6 +451,14 @@
     </div>
 
     <div class="p">
+      <div class="lab"><span>驱动方式</span></div>
+      <select id="driveSel">
+        <option value="kick">鼓点（跟低频能量）</option>
+        <option value="beat">节拍（跟检测出的 BPM）</option>
+      </select>
+    </div>
+
+    <div class="p" id="bandRow">
       <div class="lab"><span>驱动频段</span></div>
       <select id="bandSel">
         <option value="bass">低频 20–250 Hz（鼓点）</option>
@@ -417,6 +466,8 @@
         <option value="mid">中高频 0.8–5 kHz</option>
       </select>
     </div>
+
+    <div id="bpmStatus" class="tips" style="margin-top:5px"></div>
 
     <div class="p">
       <div class="lab"><span>地面效果</span></div>
@@ -522,13 +573,26 @@
 </div>
 
 <!-- 从视频取音频属于测试功能，导入视频时弹这个 -->
-<div id="warnMask" hidden>
-  <div id="warnBox" role="alertdialog" aria-modal="true" aria-labelledby="warnTitle">
-    <div id="warnTitle">⚠︎ 测试功能</div>
+<div id="warnMask" class="modal" hidden>
+  <div id="warnBox" class="modal-box" role="alertdialog" aria-modal="true" aria-labelledby="warnTitle">
+    <div id="warnTitle" class="modal-title">⚠︎ 测试功能</div>
     <p>从<b>视频文件</b>中读取音频目前处于<b>测试阶段</b>，可能出现 bug。</p>
     <p class="dim">如果导入后画面不动、或完全没有声音，多半是这个视频的音轨编码浏览器解不了，
       建议改用纯音频文件（MP3 / WAV / M4A）。</p>
-    <button id="warnOk">我知道了</button>
+    <button id="warnOk" class="modal-btn">我知道了</button>
+  </div>
+</div>
+
+<!-- 录制完成后：手机上直接调系统分享面板存进相册 -->
+<div id="saveMask" class="modal" hidden>
+  <div id="saveBox" class="modal-box" role="dialog" aria-modal="true" aria-labelledby="saveTitle">
+    <div id="saveTitle">录制完成</div>
+    <p id="saveInfo"></p>
+    <p class="dim" id="saveHint"></p>
+    <div id="saveRow">
+      <button id="saveAlbum" class="modal-btn">保存到相册</button>
+      <button id="saveDownload" class="modal-btn">下载文件</button>
+    </div>
   </div>
 </div>
 
@@ -537,6 +601,50 @@
   <button class="tab" data-tab="settings">抖动设置</button>
   <button class="tab" data-tab="color">背景颜色</button>
 </nav>
+
+<!-- GIF 导出：先选时长，捕获后给预览，再选保存方式 -->
+<div id="gifMask" class="modal" hidden>
+  <div id="gifBox" class="modal-box" role="dialog" aria-modal="true" aria-labelledby="gifTitle">
+    <div id="gifTitle" class="modal-title" style="color:#9ec8ff">保存为 GIF 动图</div>
+
+    <!-- 第一步：在时间轴上选区间 -->
+    <div id="gifSetup">
+      <p>在音乐上选一段，把它做成无限循环的 GIF。</p>
+
+      <div id="tlWrap">
+        <div id="tlSel"></div>
+        <div id="tlTick"></div>
+      </div>
+
+      <div class="p tl-lab" style="margin-top:10px">
+        <div class="lab"><span>开始</span><b id="tlStartTxt">00:00.0</b></div>
+        <input type="range" id="tlStart" min="0" max="10" step="0.1" value="0">
+      </div>
+      <div class="p tl-lab">
+        <div class="lab"><span>结束</span><b id="tlEndTxt">00:03.0</b></div>
+        <input type="range" id="tlEnd" min="0" max="10" step="0.1" value="3">
+      </div>
+
+      <p class="dim" id="gifEst" style="margin-top:8px"></p>
+      <div class="modal-row">
+        <button id="gifStart" class="modal-btn primary">开始生成</button>
+      </div>
+    </div>
+
+    <!-- 第二步：预览 + 保存 -->
+    <div id="gifDone" hidden>
+      <img id="gifImg" alt="GIF 预览">
+      <p class="dim" id="gifInfo" style="margin-top:8px"></p>
+      <div class="modal-row">
+        <button id="gifAlbum" class="modal-btn primary">保存到相册</button>
+        <button id="gifDownload" class="modal-btn">下载文件</button>
+      </div>
+    </div>
+
+    <div id="gifBar" hidden><div id="gifBarIn"></div></div>
+    <button id="gifClose" class="modal-btn" style="display:block;margin:12px auto 0;padding:6px 20px">关闭</button>
+  </div>
+</div>
 
 <div id="toast"></div>
 <div id="tip"></div>
@@ -568,7 +676,7 @@
  * ========================================================================== */
 
 /** 版本号：只在这里维护一处，顶部「制作信息」下拉栏会自动读取显示 */
-const APP_VERSION = 'v1.0.0';
+const APP_VERSION = 'v1.1.0';
 
 /* ============================================================
    0. DOM 引用与全局状态
@@ -587,6 +695,7 @@ const tAllEl   = document.getElementById('tAll');
 const modeSel  = document.getElementById('modeSel');
 const anchorSel= document.getElementById('anchorSel');
 const bandSel  = document.getElementById('bandSel');
+const driveSel = document.getElementById('driveSel');
 const bgStyleSel = document.getElementById('bgStyleSel');
 const bgPrevEl   = document.getElementById('bgPreview');
 const bgPresetsEl= document.getElementById('bgPresets');
@@ -603,6 +712,7 @@ const toastEl  = document.getElementById('toast');
 const tipEl    = document.getElementById('tip');
 const warnMask = document.getElementById('warnMask');
 const warnOk   = document.getElementById('warnOk');
+const gifMask  = document.getElementById('gifMask');
 const tabbarEl = document.getElementById('tabbar');
 const dropMask = document.getElementById('dropMask');
 
@@ -642,6 +752,12 @@ const RETRACT_GAIN = 1.6;             // 压缩增益补偿，原因见 drawFram
 const PARAM_DEFS = [
   // key        显示名            最小   最大   步长    默认值   说明
   // help 字段 = 参数名右边那个 ⓘ 图标悬停时弹出的帮助文字
+  // 排在最前的两项只在「节拍」驱动方式下显示（见 syncDriveUI）——
+  // 放最前面是为了让它们紧跟在「驱动方式」下面，不用滚动就能看到
+  { key:'bpm',       label:'节拍 BPM',      min:40,  max:240, step:1,    def:120, int:true,
+    help:'每分钟拍数。导入音频后会自动检测并填进来，检测不准就直接改这个数。' },
+  { key:'beatOffset', label:'拍点微调(ms)', min:-150,max:150, step:1,    def:0,   int:true,
+    help:'整体提前或推后节拍触发。如果图片总是比鼓点早一点或晚一点，用这个对准。' },
   { key:'gain',      label:'灵敏度',        min:0.2, max:4,   step:0.05, def:1.00,
     help:'总幅度开关。数值越大，同样的音乐抖得越猛。配合「自动增益」使用效果最稳。' },
   { key:'agc',       label:'自动增益',      min:0,   max:1,   step:0.05, def:0.75,
@@ -1135,7 +1251,12 @@ function readBandEnergy() {
 function updateEnvelope(dt) {
   let target = 0;
 
-  if (analyser && !audio.paused && !audio.ended) {
+  if (driveSel.value === 'beat') {
+    // ---- 节拍模式：目标是"每拍一次冲击"，跟音频能量无关 ----
+    target = updateBeatDrive(dt);
+
+  } else if (analyser && !audio.paused && !audio.ended) {
+    // ---- 鼓点模式：跟低频能量 ----
     analyser.getByteFrequencyData(freqData);  // 把当前频谱填进 freqData
 
     const raw = readBandEnergy();
@@ -1173,8 +1294,332 @@ function updateEnvelope(dt) {
   if (history.length > HISTORY_MAX) history.shift();
 }
 
+/* ============================================================
+   3.4 BPM 检测（离线，导入时算一次）
+
+   思路：
+     1) 低采样率解码整首歌 → 单声道 PCM（只用低频，11025Hz 足够，还省内存）
+     2) 分两个频带做滤波：低频抓底鼓，高频抓军鼓/踩镲
+     3) 各频带取「包络的正向差分」= 起始点强度，两带归一化后相加
+     4) 对起始点序列做自相关，找周期；用梳状打分 + 120BPM 先验压掉倍频错误
+     5) 用脉冲串互相关找相位（第一拍在哪）
+     6) 拿粗周期做预测 → 在附近找真实峰 → 线性回归出精确周期
+
+   为什么第 6 步必要：自相关的 lag 分辨率很粗（100Hz 的包络下，
+   128BPM 附近一格就差 2.7BPM），直接用它会在几分钟里漂移到完全对不上。
+   线性回归把整段时长当基线，精度能提高一两个数量级。
+   ============================================================ */
+
+const BPM_ENV_RATE = 100;   // 起始点强度序列的帧率（Hz），够用且算得快
+const BPM_MAX_SEC  = 90;    // 最多分析多少秒。整首歌全算没必要，还慢
+
+/** 双二阶（biquad）滤波器系数，RBJ Cookbook 标准公式 */
+function biquadCoeffs(type, f0, Q, sr) {
+  const w0 = 2 * Math.PI * f0 / sr;
+  const cos = Math.cos(w0), sin = Math.sin(w0);
+  const alpha = sin / (2 * Q);
+  let b0, b1, b2, a0, a1, a2;
+  if (type === 'lowpass') {
+    b0 = (1 - cos) / 2; b1 = 1 - cos; b2 = (1 - cos) / 2;
+  } else { // bandpass，恒定峰值增益
+    b0 = alpha; b1 = 0; b2 = -alpha;
+  }
+  a0 = 1 + alpha; a1 = -2 * cos; a2 = 1 - alpha;
+  return { b0: b0/a0, b1: b1/a0, b2: b2/a0, a1: a1/a0, a2: a2/a0 };
+}
+
+/** 原地滤波，返回输出数组 */
+function biquadRun(x, c) {
+  const y = new Float32Array(x.length);
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  for (let i = 0; i < x.length; i++) {
+    const xi = x[i];
+    const yi = c.b0*xi + c.b1*x1 + c.b2*x2 - c.a1*y1 - c.a2*y2;
+    x2 = x1; x1 = xi; y2 = y1; y1 = yi;
+    y[i] = yi;
+  }
+  return y;
+}
+
+/**
+ * 算起始点强度序列。
+ * 返回 { env, rate } —— rate 是真实帧率。
+ * 注意 rate 不等于 BPM_ENV_RATE：hop 必须取整，所以 11025/round(11025/100) = 100.227Hz。
+ * 按 100 算的话会给所有速度引入 0.23% 的误差，几十拍之后相位就飘没了。
+ */
+function onsetEnvelope(pcm, sr) {
+  const hop = Math.max(1, Math.round(sr / BPM_ENV_RATE));
+  const rate = sr / hop;
+  const n = Math.floor(pcm.length / hop);
+  const env = new Float32Array(n);
+
+  // 两个频带：底鼓（低频）＋ 军鼓/踩镲（中高频）
+  const bands = [
+    biquadCoeffs('lowpass',   150, 0.7, sr),
+    biquadCoeffs('bandpass', 2500, 1.0, sr),
+  ];
+  // 包络平滑系数：约 30ms
+  const a = 1 - Math.exp(-1 / (0.030 * sr));
+
+  for (const c of bands) {
+    const f = biquadRun(pcm, c);
+    let e = 0, prev = 0;
+    let peak = 1e-9;
+    const diff = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      // 帧内取整流后的平均值当包络
+      let acc = 0;
+      const s = i * hop, e2 = Math.min(s + hop, f.length);
+      for (let j = s; j < e2; j++) acc += Math.abs(f[j]);
+      e += (acc / Math.max(1, e2 - s) - e) * a * hop;   // 一阶平滑
+      const d = e - prev;
+      diff[i] = d > 0 ? d : 0;                          // 只保留"变响"的部分
+      prev = e;
+      if (diff[i] > peak) peak = diff[i];
+    }
+    // 归一化后累加，免得某个频带音量天生就大、把另一个盖掉
+    for (let i = 0; i < n; i++) env[i] += diff[i] / peak;
+  }
+
+  // 去均值 + 半波整流
+  let mean = 0;
+  for (let i = 0; i < n; i++) mean += env[i];
+  mean /= n || 1;
+  for (let i = 0; i < n; i++) env[i] = Math.max(0, env[i] - mean);
+  return { env: env, rate: rate };
+}
+
+/**
+ * 从起始点序列估速度和相位。返回 { bpm, phase }（phase 单位秒），失败返回 null。
+ *
+ * 用的是「相位折叠梳状滤波」而不是自相关。原因：自相关在 174BPM 这类速度上
+ * 容易锁到 2/3 周期（实测把 174 测成 116）。折叠法的判据更直接 ——
+ * 它问的是"用这个周期的脉冲串去敲，能不能把起音点全都敲中"：
+ *   真实周期   → 所有起音点折进同一个相位格 → 分数最高
+ *   半速（2×周期）→ 起音点被劈成两格，每格只有一半      → 分数低
+ *   倍速（0.5×周期）→ 脉冲数翻倍，按脉冲数归一化后被摊薄 → 分数低
+ * 所以倍频/半频错误是被公式自然压掉的，不靠事后补丁。
+ */
+function estimateTempo(env, rate) {
+  const n = env.length;
+  if (n < rate * 6) return null;                   // 太短，别浪费时间
+
+  const BPM_MIN = 50, BPM_MAX = 220, BINS = 96;
+  const MIN_CONTRAST = 4;      // 相位集中度低于这个值说明"根本没有拍"，判为失败
+
+  /** 按周期 p（帧）折叠出的相位集中度；越大说明该周期越能解释这些起音点 */
+  function foldScore(p) {
+    const h = new Float64Array(BINS);
+    for (let i = 0; i < n; i++) {
+      let f = (i / p) % 1;
+      if (f < 0) f += 1;
+      let b = (f * BINS) | 0;
+      if (b < 0) b = 0; else if (b >= BINS) b = BINS - 1;
+      h[b] += env[i];
+    }
+    let total = 0;
+    for (let b = 0; b < BINS; b++) total += h[b];
+
+    /* 关键：窗口宽度要按「固定时间」折算，不能写成固定的格子数。
+       周期越长，一帧占的格子越少、起音点在相位上越集中；
+       固定格子数的话长周期会白占便宜，结果就会系统性地偏向半速
+       （实测 160→80、174→87）。按 ±25ms 折算后，窗口总能罩住整个起音点，
+       得分就和周期无关了，倍速/半速的比值才回到理论上的 2:1。 */
+    const wb = Math.max(0, Math.round(0.025 * rate / p * BINS));
+    let best = -1, bi = 0;
+    for (let b = 0; b < BINS; b++) {
+      let v = 0;
+      for (let d = -wb; d <= wb; d++) v += h[(b + d + BINS) % BINS];
+      if (v > best) { best = v; bi = b; }
+    }
+    // 按脉冲数开方归一化：不除会一路偏向最快，除多了又偏向最慢
+    return {
+      score: best / Math.sqrt(Math.max(1, n / p)),
+      bin: bi,
+      contrast: best / (total / BINS + 1e-12),   // 峰值 / 均值，用来判断"到底有没有拍"
+    };
+  }
+
+  // 120BPM 附近的先验（对数正态），作用是打破倍速/半速打平的局面
+  const prior = bpm => Math.exp(-0.5 * Math.pow(Math.log2(bpm / 120) / 0.9, 2));
+
+  let best = { s: -Infinity, bpm: 120, p: rate * 0.5, bin: 0, contrast: 0 };
+  const consider = bpm => {
+    const p = rate * 60 / bpm;
+    if (p < 2 || p > n - 2) return;
+    const r = foldScore(p);
+    if (r.contrast < MIN_CONTRAST) return;      // 太散，不算数
+    const s = r.score * prior(bpm);
+    if (s > best.s) best = { s: s, bpm: bpm, p: p, bin: r.bin, contrast: r.contrast };
+  };
+
+  /* 两级扫描。粗扫定大致范围，再在附近做细扫。
+     细扫这一步不能省：周期误差会让相位随时间线性漂移 —— 差 0.5 帧的周期，
+     几十拍之后就漂掉整整一个周期，起音点全被摊平，分数反而低于它的倍周期。
+     所以格点必须密到"整段累积漂移远小于一个周期"。 */
+  for (let bpm = BPM_MIN; bpm <= BPM_MAX; bpm += 1) consider(bpm);
+  const c0 = best.bpm;
+  for (let bpm = Math.max(BPM_MIN, c0 - 3); bpm <= Math.min(BPM_MAX, c0 + 3); bpm += 0.05) {
+    consider(bpm);
+  }
+  if (best.s === -Infinity) return null;        // 整段没有明显节拍
+
+  let periodSec = 60 / best.bpm;
+  let phaseSec  = ((best.bin + 0.5) / BINS) * best.p / rate;
+
+  // --- 用预测位置反查真实峰，再线性回归出精确周期 ---
+  // 这一步不能省：折叠法给的周期精度约 0.05BPM 看着够，
+  // 但相位是从直方图格子里取的，比较粗；回归能同时把两者都收紧。
+  const peaks = [];
+  for (let k = 0; ; k++) {
+    const pred = phaseSec * rate + k * periodSec * rate;
+    if (pred >= n - 2) break;
+    const w = Math.max(2, Math.round(periodSec * rate * 0.18));
+    let bi = -1, bv = -1;
+    for (let i = Math.max(0, Math.round(pred) - w);
+         i <= Math.min(n - 1, Math.round(pred) + w); i++) {
+      if (env[i] > bv) { bv = env[i]; bi = i; }
+    }
+    if (bi < 0) continue;
+    let t = bi;                                     // 峰上再做抛物线插值，取亚帧精度
+    if (bi > 0 && bi < n - 1) {
+      const y0 = env[bi - 1], y1 = env[bi], y2 = env[bi + 1];
+      const den = 2 * (2 * y1 - y0 - y2);
+      if (Math.abs(den) > 1e-12) t = bi + (y2 - y0) / den;
+    }
+    peaks.push({ k: k, t: t });
+  }
+
+  if (peaks.length >= 6) {
+    let sk = 0, st = 0, skk = 0, skt = 0;
+    const m = peaks.length;
+    for (const p of peaks) { sk += p.k; st += p.t; skk += p.k * p.k; skt += p.k * p.t; }
+    const den = m * skk - sk * sk;
+    if (Math.abs(den) > 1e-9) {
+      const b = (m * skt - sk * st) / den;          // 斜率 = 每拍多少帧
+      const a = (st - b * sk) / m;                  // 截距 = 第一拍在哪
+      if (b > 0 && isFinite(b)) {
+        periodSec = b / rate;
+        phaseSec  = a / rate;
+      }
+    }
+  }
+
+  const bpm = 60 / periodSec;
+  if (!isFinite(bpm) || bpm < 30 || bpm > 300) return null;
+  return { bpm: bpm, phase: phaseSec };
+}
+
+/* 检测出来的节拍相位（秒）。BPM 本身放在 P.bpm 里，用户可手改。 */
+let beatPhase = 0;
+let analyzingBpm = false;
+
+/** 导入音频后跑一次：解码 → 检测 → 写回参数 */
+async function analyzeBpm(file) {
+  if (analyzingBpm) return;
+  analyzingBpm = true;
+  const st = document.getElementById('bpmStatus');
+  if (st) st.textContent = '正在检测 BPM…';
+
+  try {
+    const ab = await file.arrayBuffer();
+    // 用低采样率的 OfflineAudioContext 解码：decodeAudioData 会重采样到该上下文的采样率，
+    // 做 BPM 只需要低频，11025Hz 足够，内存还能省好几倍。
+    const oac = new OfflineAudioContext(1, 11025, 11025);
+    const buf = await oac.decodeAudioData(ab);
+    const sr = buf.sampleRate;
+    const pcm = buf.getChannelData(0);
+
+    // 掐头去尾：跳过前奏，限制分析长度
+    const total = pcm.length;
+    const maxSamples = Math.min(total, Math.floor(BPM_MAX_SEC * sr));
+    const start = total > maxSamples * 1.5
+      ? Math.floor(Math.min(total * 0.15, (total - maxSamples)))
+      : 0;
+    const slice = pcm.subarray(start, start + maxSamples);
+
+    const env = onsetEnvelope(slice, sr);
+    const res = estimateTempo(env.env, env.rate);
+
+    if (res) {
+      beatPhase = res.phase;
+      P.bpm = Math.round(res.bpm);
+      saveParams();
+      syncParamUI('bpm');
+      if (st) {
+        st.textContent = '检测到 ' + res.bpm.toFixed(1) + ' BPM（已取整为 ' +
+          P.bpm + '，不准可直接改）';
+      }
+    } else {
+      if (st) st.textContent = '没能测出 BPM，请手动填写，或用「鼓点」驱动方式';
+    }
+  } catch (e) {
+    if (st) st.textContent = 'BPM 检测失败：' + (e && e.name || '错误') + '，可手动填写';
+  } finally {
+    analyzingBpm = false;
+  }
+}
+
+/* ============================================================
+   3.5 节拍驱动：把 BPM 变成"每拍一次冲击"
+   ============================================================ */
+
+let beatLevel = 0;        // 节拍包络：每拍置 1，然后快速衰减
+let lastBeatIdx = NaN;    // 上一次触发的是第几拍，用来判断"这一拍还没触发过"
+
+/**
+ * 返回当前这一帧的节拍强度 0~1。
+ * 拍的时间点 = k × (60/BPM) + 相位 + 微调偏移。
+ */
+function updateBeatDrive(dt) {
+  const bpm = P.bpm;
+  const period = 60 / Math.max(20, bpm);
+  const shift = (P.beatOffset || 0) / 1000;
+  const tau = Math.max(0.04, period * 0.28);
+
+  // 先衰减，再判断这一帧是不是拍点 —— 顺序反了的话返回值永远到不了 1
+  beatLevel *= Math.exp(-dt / tau);
+
+  if (!audio.paused && !audio.ended) {
+    // 用媒体的播放时钟，和声音本身严格对齐
+    const t = audio.currentTime - beatPhase - shift;
+    const idx = Math.floor(t / period);
+    if (idx !== lastBeatIdx) {
+      // 只在"换拍"时触发。但如果一下跳了很多拍（拖动进度条），
+      // 就不要连喷一串冲击，给一个较小的值意思一下即可。
+      if (!isFinite(lastBeatIdx) || Math.abs(idx - lastBeatIdx) === 1) {
+        beatLevel = 1;
+      } else {
+        beatLevel = Math.max(beatLevel, 0.6);
+      }
+      lastBeatIdx = idx;
+    }
+  }
+
+  if (beatLevel < 1e-4) beatLevel = 0;
+  return beatLevel;
+}
+
+/** 切换驱动方式时同步界面：BPM / 微调只在节拍模式下才有意义 */
+function syncDriveUI() {
+  const beat = driveSel.value === 'beat';
+  const bandRow = document.getElementById('bandRow');
+  if (bandRow) {
+    bandRow.style.opacity = beat ? '0.35' : '1';
+    const bs = bandRow.querySelector('select');
+    if (bs) bs.disabled = beat;
+  }
+  // 这两行是从 PARAM_DEFS 生成的，按 data-key 找到再显示/隐藏
+  for (const key of ['bpm', 'beatOffset']) {
+    const wrap = allParamWraps().find(w => w.dataset.key === key);
+    if (wrap) wrap.hidden = !beat;
+  }
+  const st = document.getElementById('bpmStatus');
+  if (st) st.hidden = !beat;
+}
+
 /* ------------------------------------------------------------
-   3.5 弹簧（弹性回缩的来源）
+   3.6 弹簧（弹性回缩的来源）
 
    为什么需要它：如果直接令 位移 = -最大位移 × 强度，图片就是"瞬移到位、平静落回"，
    没有惯性、没有回弹。改成让位移跟随一个二阶弹簧系统，就会自然产生：
@@ -1554,14 +1999,58 @@ function drawFrame(now) {
   if (reflectChk.checked) drawReflection(L, st, a);
 }
 
-/** 还没导入图片时的引导文字（颜色按背景明暗自适应） */
+/** 按可用宽度把文字折行。中文没有空格可断，所以按字符逐个累加测量 */
+function wrapText(text, maxWidth) {
+  // 行首禁则：这些标点不能出现在行首，否则会出现一整行只有一个「」的怪样子
+  const NO_START = '」』）】》〉，。、；：？！·%…,.;:?!)]}';
+  const lines = [];
+  let cur = '';
+  for (const ch of text) {
+    const test = cur + ch;
+    if (cur && ctx.measureText(test).width > maxWidth) {
+      if (NO_START.indexOf(ch) >= 0) {
+        // 宁可让本行稍微超一点点（外面还留着 24px 边距，不会真被裁掉）
+        lines.push(cur + ch);
+        cur = '';
+      } else {
+        lines.push(cur);
+        cur = ch;
+      }
+    } else {
+      cur = test;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+/** 还没导入图片时的引导文字（颜色按背景明暗自适应，窄屏自动折行） */
 function drawHint() {
   const W = canvas.clientWidth, H = canvas.clientHeight;
   ctx.save();
   ctx.textAlign = 'center';
   ctx.fillStyle = isLightBG() ? 'rgba(20,26,40,.62)' : 'rgba(200,215,240,.55)';
-  ctx.font = '16px "Segoe UI", "Microsoft YaHei", sans-serif';
-  ctx.fillText('点击左上角「导入图片」和「导入音频」，或直接把文件拖进窗口', W / 2, H / 2);
+
+  /* 手机上入口在底部的标签栏里，既没有"左上角"也没法拖拽，
+     所以文案要换一套，不然提示的是根本做不到的操作 */
+  const touch = window.matchMedia('(hover: none)').matches;
+  const text = (touch || W < 640)
+    ? '点下方「抖动设置」，再点「导入图片」或「导入音频」'
+    : '点击左上角「导入图片」和「导入音频」，或直接把文件拖进窗口';
+
+  // 窄屏字号也收一点，免得折成四五行
+  const fs = W < 420 ? 13 : 16;
+  ctx.font = fs + 'px "Segoe UI", "Microsoft YaHei", sans-serif';
+  ctx.textBaseline = 'middle';
+
+  // 左右各留 24px，再给一个上限宽度，别在宽屏上拉成一整行
+  const maxW = Math.max(80, Math.min(W - 48, 560));
+  const lines = wrapText(text, maxW);
+  const lh = Math.round(fs * 1.6);
+  const y0 = H / 2 - ((lines.length - 1) * lh) / 2;
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], W / 2, y0 + i * lh);
+  }
   ctx.restore();
 }
 
@@ -1596,6 +2085,7 @@ function loop(now) {
   }
 
   updateHud(dt);
+  updateGifCapture(now);   // GIF 捕获期间按固定帧率抓画面
   requestAnimationFrame(loop);
 }
 
@@ -1758,6 +2248,18 @@ function waitForAudioReady(el, timeoutMs) {
     return;
   }
   toast((kind === 'video' ? '已取到视频音轨：' : '音频已导入：') + file.name);
+
+  // 导入成功后再跑 BPM 检测。它要重新解码一遍，比较费时，
+  // 所以不阻塞在这里 —— 用户可以先播着，检测完自动填进参数里。
+  resetBeatClock();
+  analyzeBpm(file);
+}
+
+/** 换歌时把节拍时钟复位，免得拿上一首的相位去对新的 */
+function resetBeatClock() {
+  beatLevel = 0;
+  lastBeatIdx = NaN;
+  beatPhase = 0;
 }
 
 fileImg.onchange   = e => { if (e.target.files[0]) loadImage(e.target.files[0]); fileImg.value = ''; };
@@ -1874,6 +2376,13 @@ document.addEventListener('pointerdown', e => {
 
 // 频段切换后需要重算 bin 区间
 bandSel.onchange = () => { binRange = null; };
+
+// 驱动方式切换（鼓点 / 节拍）
+driveSel.onchange = () => {
+  syncDriveUI();
+  // 从节拍切回鼓点时要清掉遗留的节拍包络，否则会残留一次弹动
+  if (driveSel.value !== 'beat') { beatLevel = 0; lastBeatIdx = NaN; }
+};
 
 // 背景样式切换
 bgStyleSel.onchange = saveUI;
@@ -2025,18 +2534,86 @@ document.getElementById('btnRec').onclick = () => {
   recChunks = [];
   recording.ondataavailable = e => { if (e.data && e.data.size) recChunks.push(e.data); };
   recording.onstop = () => {
-    download(new Blob(recChunks, { type: recMime || 'video/webm' }),
-             'shake-' + Date.now() + '.' + ext);
+    const blob = new Blob(recChunks, { type: recMime || 'video/webm' });
+    const name = 'shake-' + Date.now() + '.' + ext;
     recording = null; recChunks = [];
     document.getElementById('btnRec').classList.remove('on');
     document.getElementById('btnRec').textContent = '● 录制';
-    toast('录制完成：' + ext.toUpperCase() + '，已开始下载');
+    deliverRecording(blob, name, ext);
   };
   recording.start();
   document.getElementById('btnRec').classList.add('on');
   document.getElementById('btnRec').textContent = '■ 停止';
   toast('录制中（' + ext.toUpperCase() + '）…再点一次停止；需要音频正在播放才有声音');
 };
+
+/* ------------------------------------------------------------
+   录制成品怎么交给用户
+
+   手机上浏览器**不能直接往相册写文件**（没有这种 API）。
+   能做到"存进相册"的唯一通路是 Web Share：把文件交给系统分享面板，
+   用户在面板里选「存储到照片 / 保存视频」，系统就会把它放进相册。
+   桌面没有这个面板，所以桌面沿用直接下载。
+   ------------------------------------------------------------ */
+
+let pendingBlob = null, pendingName = '';
+
+/** 这台设备能不能通过系统分享把文件存进相册 */
+function canShareFile(blob, name) {
+  if (!navigator.share || !navigator.canShare || typeof File === 'undefined') return false;
+  try {
+    return navigator.canShare({ files: [new File([blob], name, { type: blob.type })] });
+  } catch (e) { return false; }
+}
+
+function deliverRecording(blob, name, ext) {
+  pendingBlob = blob; pendingName = name;
+
+  /* 不能靠"是不是手机"来判断 —— 桌面 Chrome 同样有 navigator.share，
+     而且不少平台也支持分享文件。所以统一弹框，按 canShareFile 决定
+     要不要露出「保存到相册」这个按钮。 */
+  const shareable = canShareFile(blob, name);
+  document.getElementById('saveAlbum').hidden = !shareable;
+  document.getElementById('saveHint').textContent = shareable
+    ? '「保存到相册」会打开系统分享面板，在里面选「存储到照片」或「保存视频」即可。'
+    : '当前浏览器不支持系统分享，用「下载文件」保存到设备即可。';
+
+  const mb = (blob.size / 1048576).toFixed(1);
+  document.getElementById('saveInfo').innerHTML =
+    '格式 <b>' + ext.toUpperCase() + '</b> · 大小 <b>' + mb + ' MB</b>';
+  document.getElementById('saveMask').hidden = false;
+  toast('录制完成，选择保存方式');
+}
+
+function closeSaveDialog() {
+  document.getElementById('saveMask').hidden = true;
+}
+
+document.getElementById('saveDownload').onclick = () => {
+  if (pendingBlob) download(pendingBlob, pendingName);
+  closeSaveDialog();
+  toast('已开始下载，可在「文件 / 下载」里找到');
+};
+
+document.getElementById('saveAlbum').onclick = async () => {
+  if (!pendingBlob) { closeSaveDialog(); return; }
+  const f = new File([pendingBlob], pendingName, { type: pendingBlob.type });
+  try {
+    // 必须由用户点击触发，否则浏览器会拒绝
+    await navigator.share({ files: [f], title: '音频Q弹化工具箱' });
+    closeSaveDialog();
+    toast('已交给系统分享面板');
+  } catch (err) {
+    // 用户点了取消会走到这里，不算错误
+    if (err && err.name === 'AbortError') { closeSaveDialog(); return; }
+    toast('分享失败：' + ((err && err.message) || '未知原因'));
+  }
+};
+
+// 点遮罩空白处关闭
+document.getElementById('saveMask').addEventListener('pointerdown', e => {
+  if (e.target.id === 'saveMask') closeSaveDialog();
+});
 
 function download(blob, name) {
   const a = document.createElement('a');
@@ -2045,6 +2622,490 @@ function download(blob, name) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 10000);
 }
+
+/* ============================================================
+   9. GIF 导出（自写编码器，零依赖）
+
+   GIF 没有现成的浏览器 API 能生成，所以这里手写三段：
+     9.1 量化：中位切分把画面压到 256 色
+     9.2 编码：LZW 压缩 + GIF89a 封装
+     9.3 捕获：按固定帧率从 canvas 取样，算完给预览
+   之所以不用固定调色板（比如 6×6×6 色块）：这个工具有渐变背景，
+   固定色块会有非常明显的色带，中位切分是按画面实际颜色自适应分配的。
+   ============================================================ */
+
+/* ---------- 9.1 中位切分量化 ---------- */
+
+/** 5bit/通道 的桶键，最多 32768 个桶 */
+function histKey(r, g, b) {
+  return ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+}
+
+/** 建直方图：每 3 个像素采一个，够用且快 */
+function buildHistogram(frames, w, h) {
+  const map = new Map();
+  for (const f of frames) {
+    const d = f.data;
+    for (let i = 0; i < d.length; i += 12) {       // 每 3 像素
+      const k = histKey(d[i], d[i + 1], d[i + 2]);
+      let e = map.get(k);
+      if (!e) { e = { r: 0, g: 0, b: 0, n: 0 }; map.set(k, e); }
+      e.r += d[i]; e.g += d[i + 1]; e.b += d[i + 2]; e.n++;
+    }
+  }
+  return map;
+}
+
+/** 一个盒子里各通道的跨度，用来决定从哪个轴切 */
+function boxRange(box) {
+  let r0 = 255, r1 = 0, g0 = 255, g1 = 0, b0 = 255, b1 = 0, n = 0;
+  for (const e of box) {
+    const r = e.r / e.n, g = e.g / e.n, b = e.b / e.n;
+    if (r < r0) r0 = r; if (r > r1) r1 = r;
+    if (g < g0) g0 = g; if (g > g1) g1 = g;
+    if (b < b0) b0 = b; if (b > b1) b1 = b;
+    n += e.n;
+  }
+  return { dr: r1 - r0, dg: g1 - g0, db: b1 - b0, n: n };
+}
+
+/**
+ * 中位切分：反复把"最该切"的盒子沿最长轴一分为二，直到凑够颜色数。
+ * 切点按像素数取中位，不是按桶数 —— 否则大片纯色区域会被切得很细。
+ */
+function medianCut(hist, maxColors) {
+  let boxes = [Array.from(hist.values())];
+  while (boxes.length < maxColors) {
+    let bi = -1, bestScore = -1;
+    for (let i = 0; i < boxes.length; i++) {
+      if (boxes[i].length < 2) continue;
+      const rg = boxRange(boxes[i]);
+      const score = Math.max(rg.dr, rg.dg, rg.db) * Math.log(rg.n + 1);
+      if (score > bestScore) { bestScore = score; bi = i; }
+    }
+    if (bi < 0) break;                       // 已经切不动了
+    const box = boxes[bi];
+    const rg = boxRange(box);
+    const axis = rg.dr >= rg.dg && rg.dr >= rg.db ? 'r' : (rg.dg >= rg.db ? 'g' : 'b');
+    box.sort((a, b) => (a[axis] / a.n) - (b[axis] / b.n));
+    // 按累计像素数找到中位位置。
+    // 必须把切点夹在 [1, len-1]：中位数如果落在最后一个桶上，
+    // 切点会跑到末尾、切出一个空盒子 —— 空盒子的平均色就是纯黑，
+    // 结果就是调色板里塞满黑色、画面整体变黑（这个 bug 实测过）。
+    let total = 0;
+    for (const e of box) total += e.n;
+    let acc = 0, cut = box.length - 1;
+    for (let i = 0; i < box.length - 1; i++) {
+      acc += box[i].n;
+      if (acc >= total / 2) { cut = i + 1; break; }
+    }
+    if (cut < 1) cut = 1;
+    if (cut > box.length - 1) cut = box.length - 1;
+    boxes.splice(bi, 1, box.slice(0, cut), box.slice(cut));
+  }
+  return boxes.map(box => {
+    let r = 0, g = 0, b = 0, n = 0;
+    for (const e of box) { r += e.r; g += e.g; b += e.b; n += e.n; }
+    n = n || 1;
+    return [Math.round(r / n), Math.round(g / n), Math.round(b / n)];
+  });
+}
+
+/** 颜色索引查找表：32768 个 5bit 桶 → 调色板下标，按需计算并缓存 */
+function makeColorLUT(palette) {
+  const lut = new Int16Array(32768).fill(-1);
+  return function (r, g, b) {
+    const k = histKey(r, g, b);
+    let v = lut[k];
+    if (v >= 0) return v;
+    let best = 0, bestD = 1e12;
+    for (let i = 0; i < palette.length; i++) {
+      const p = palette[i];
+      const dr = r - p[0], dg = g - p[1], db = b - p[2];
+      const d = dr * dr + dg * dg + db * db;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    lut[k] = best;
+    return best;
+  };
+}
+
+/* ---------- 9.2 LZW + GIF89a 封装 ---------- */
+
+/**
+ * GIF 的 LZW。注意几个容易写错的地方：
+ *  - 码长在「下一个可用码 == 2^码长」时进位（不是超过之后才进），
+ *    否则第 512 个码会溢出 9 位；
+ *  - 码从低位往高位塞进字节流；
+ *  - 输出要切成 ≤255 字节的子块，每块前面写长度。
+ */
+function lzwEncode(pixels, minCodeSize) {
+  const clearCode = 1 << minCodeSize;
+  const endCode = clearCode + 1;
+  let codeSize = minCodeSize + 1;
+  let nextCode = endCode + 1;
+  let dict = new Map();
+
+  const out = [];
+  let bitBuf = 0, bitCount = 0;
+
+  function emit(code) {
+    bitBuf |= code << bitCount;
+    bitCount += codeSize;
+    while (bitCount >= 8) {
+      out.push(bitBuf & 0xFF);
+      bitBuf >>>= 8;
+      bitCount -= 8;
+    }
+  }
+
+  emit(clearCode);
+
+  let prefix = pixels[0];
+  for (let i = 1; i < pixels.length; i++) {
+    const c = pixels[i];
+    const key = prefix * 256 + c;
+    const found = dict.get(key);
+    if (found !== undefined) { prefix = found; continue; }
+
+    emit(prefix);
+    if (nextCode < 4096) {
+      dict.set(key, nextCode++);
+      /* 进位阈值必须比"表满"晚一个条目。
+         因为编码端每 emit 一次就加一个条目，而解码端从第 2 个码才开始加，
+         它天生落后编码端一个。用 `> (1<<codeSize) - 1` 会让编码端提前进位，
+         解码端还按旧的位宽读，两边立刻错位（实测：递增数据解到第 516 号码就非法）。
+         写成 `> (1<<codeSize)` 正好对齐。 */
+      if (nextCode > (1 << codeSize) && codeSize < 12) codeSize++;
+    } else {
+      emit(clearCode);
+      dict = new Map();
+      nextCode = endCode + 1;
+      codeSize = minCodeSize + 1;
+    }
+    prefix = c;
+  }
+  emit(prefix);
+  emit(endCode);
+  if (bitCount > 0) out.push(bitBuf & 0xFF);
+
+  // 切成子块
+  const blocks = [];
+  for (let i = 0; i < out.length; i += 255) {
+    const len = Math.min(255, out.length - i);
+    blocks.push(len);
+    for (let j = 0; j < len; j++) blocks.push(out[i + j]);
+  }
+  blocks.push(0);       // 子块结束符
+  return blocks;
+}
+
+/** 把若干帧拼成 GIF89a 字节流 */
+function buildGif(frames, w, h, palette, delayCs) {
+  const bytes = [];
+  const u8 = v => bytes.push(v & 0xFF);
+  const u16 = v => { bytes.push(v & 0xFF, (v >> 8) & 0xFF); };
+  const str = s => { for (let i = 0; i < s.length; i++) bytes.push(s.charCodeAt(i)); };
+
+  // 调色板补齐到 2 的幂
+  let bits = 1;
+  while ((1 << bits) < palette.length) bits++;
+  if (bits < 1) bits = 1;
+  const palSize = 1 << bits;
+
+  str('GIF89a');
+  u16(w); u16(h);
+  u8(0x80 | ((bits - 1) & 7) | 0x70);   // 有全局调色板 + 颜色深度
+  u8(0);                                 // 背景色索引
+  u8(0);                                 // 像素宽高比
+  for (let i = 0; i < palSize; i++) {
+    const p = palette[i] || [0, 0, 0];
+    u8(p[0]); u8(p[1]); u8(p[2]);
+  }
+
+  // 无限循环
+  u8(0x21); u8(0xFF); u8(0x0B);
+  str('NETSCAPE2.0');
+  u8(0x03); u8(0x01); u16(0); u8(0x00);
+
+  for (const f of frames) {
+    // 图形控制扩展：延迟时间
+    u8(0x21); u8(0xF9); u8(0x04); u8(0x04);
+    u16(delayCs); u8(0); u8(0);
+    // 图像描述符
+    u8(0x2C); u16(0); u16(0); u16(w); u16(h); u8(0);
+    u8(8);                               // LZW 最小码长
+    const data = lzwEncode(f, 8);
+    for (const b of data) bytes.push(b);
+  }
+  u8(0x3B);                              // 结束
+
+  return new Uint8Array(bytes);
+}
+
+/* ---------- 9.3 捕获与预览 ---------- */
+
+const GIF_FPS = 12;        // 帧率。再高文件就太大了
+const GIF_MAXW = 320;      // 输出最大宽度
+const GIF_MIN_SEG = 0.6;   // 最短区间
+const GIF_MAX_SEG = 15;    // 最长区间。再长文件会大到没法当表情包传
+
+let gifCap = null;         // 捕获状态
+let gifBlob = null, gifName = '';
+let gifRestorePlay = null; // 捕获前音频的播放状态，结束后还原
+
+const tlWrap  = document.getElementById('tlWrap');
+const tlSel   = document.getElementById('tlSel');
+const tlTick  = document.getElementById('tlTick');
+const tlStart = document.getElementById('tlStart');
+const tlEnd   = document.getElementById('tlEnd');
+const tlStartTxt = document.getElementById('tlStartTxt');
+const tlEndTxt   = document.getElementById('tlEndTxt');
+const gifEst  = document.getElementById('gifEst');
+
+/** 音频总时长；没加载或还没拿到元数据就返回 0 */
+function audioDur() {
+  return (isFinite(audio.duration) && audio.duration > 0) ? audio.duration : 0;
+}
+
+function fmtT(sec) {
+  sec = Math.max(0, sec || 0);
+  const m = Math.floor(sec / 60);
+  const s = sec - m * 60;
+  return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s.toFixed(1);
+}
+
+/** 按当前 start/end 刷新滑块上限、高亮区域、时间文字和估算 */
+function gifSyncTimeline(pushEnd) {
+  const dur = audioDur();
+  if (dur > 0) {
+    tlStart.max = dur.toFixed(2);
+    tlEnd.max = dur.toFixed(2);
+  }
+  let a = parseFloat(tlStart.value);
+  let b = parseFloat(tlEnd.value);
+  if (!isFinite(a)) a = 0;
+  if (!isFinite(b)) b = a + 3;
+  if (dur > 0) { a = Math.min(a, dur); b = Math.min(b, dur); }
+
+  // 拖动时把另一端顶开，保证 a < b 且区间长度在允许范围内
+  if (pushEnd === 'start') {
+    if (b < a + GIF_MIN_SEG) b = a + GIF_MIN_SEG;
+  } else if (pushEnd === 'end') {
+    if (a > b - GIF_MIN_SEG) a = b - GIF_MIN_SEG;
+  } else {
+    if (b < a + GIF_MIN_SEG) b = a + GIF_MIN_SEG;
+  }
+  if (b - a > GIF_MAX_SEG) {
+    if (pushEnd === 'end') a = b - GIF_MAX_SEG; else b = a + GIF_MAX_SEG;
+  }
+  if (dur > 0) {
+    a = Math.max(0, Math.min(a, dur - GIF_MIN_SEG));
+    b = Math.max(a + GIF_MIN_SEG, Math.min(b, dur));
+    if (b - a > GIF_MAX_SEG) b = a + GIF_MAX_SEG;
+  }
+  if (!(b > a)) { b = a + GIF_MIN_SEG; }
+
+  tlStart.value = a.toFixed(2);
+  tlEnd.value = b.toFixed(2);
+  tlStartTxt.textContent = fmtT(a);
+  tlEndTxt.textContent = fmtT(b);
+
+  const span = dur > 0 ? dur : Math.max(b, 1);
+  tlSel.style.left = (a / span * 100).toFixed(2) + '%';
+  tlSel.style.width = Math.max(0.5, (b - a) / span * 100).toFixed(2) + '%';
+
+  const w = Math.min(GIF_MAXW, canvas.clientWidth || GIF_MAXW) & ~1;
+  const h = Math.round((canvas.clientHeight || 1) * (w / Math.max(1, canvas.clientWidth || w))) & ~1;
+  const frames = Math.round((b - a) * GIF_FPS);
+  gifEst.textContent = (dur > 0
+      ? '片段长 ' + (b - a).toFixed(1) + ' 秒 · '
+      : '未加载音频，只能录当前画面 · ') +
+    '约 ' + frames + ' 帧 · ' + w + '×' + h +
+    ((b - a) >= GIF_MAX_SEG ? ' · 已到 15 秒上限' : '');
+}
+
+document.getElementById('btnGif').onclick = () => {
+  if (!img) { toast('先导入图片再导出 GIF'); return; }
+  gifMask.hidden = false;
+  document.getElementById('gifSetup').hidden = false;
+  document.getElementById('gifDone').hidden = true;
+  document.getElementById('gifBar').hidden = true;
+
+  const dur = audioDur();
+  if (dur > 0 && parseFloat(tlEnd.max) !== dur) {
+    // 音频刚加载/换歌：把区间重设成开头 3 秒
+    tlStart.max = tlEnd.max = dur.toFixed(2);
+    tlStart.value = '0';
+    tlEnd.value = Math.min(3, dur).toFixed(2);
+  }
+  gifSyncTimeline();
+  if (!dur) toast('没有音频：只能录当前画面 3 秒');
+};
+
+tlStart.oninput = () => gifSyncTimeline('start');
+tlEnd.oninput   = () => gifSyncTimeline('end');
+
+/** 捕获时在时间轴上标出当前位置 */
+function gifTickTo(t) {
+  const dur = audioDur();
+  if (dur <= 0) { tlTick.style.display = 'none'; return; }
+  tlTick.style.display = 'block';
+  tlTick.style.left = Math.max(0, Math.min(100, t / dur * 100)).toFixed(2) + '%';
+}
+
+document.getElementById('gifStart').onclick = async () => {
+  const cw = canvas.clientWidth, ch = canvas.clientHeight;
+  if (!cw || !ch) { toast('画面尺寸异常，稍后再试'); return; }
+
+  gifSyncTimeline();
+  const a = parseFloat(tlStart.value);
+  const b = parseFloat(tlEnd.value);
+  const seg = b - a;
+  if (!(seg > 0.05)) { toast('区间太短，把结束时间往后拖一点'); return; }
+
+  const w = Math.min(GIF_MAXW, cw) & ~1;          // 保持偶数，编码器友好
+  const h = Math.round(ch * (w / cw)) & ~1;
+
+  const off = document.createElement('canvas');
+  off.width = w; off.height = h;
+  const octx = off.getContext('2d', { willReadFrequently: true });
+
+  document.getElementById('gifSetup').hidden = true;
+  document.getElementById('gifDone').hidden = true;
+  document.getElementById('gifBar').hidden = false;
+  document.getElementById('gifBarIn').style.width = '0%';
+
+  // 有音频就定位到起点开始播，捕获期间声音和画面才同步
+  const dur = audioDur();
+  gifRestorePlay = { wasPlaying: !audio.paused, pos: audio.currentTime };
+  if (dur > 0) {
+    toast('定位到 ' + fmtT(a) + '，开始捕获…');
+    ensureAudio();
+    audio.currentTime = a;
+    try { await audio.play(); } catch (e) { /* 用户手势外可能被拒，画面照样录 */ }
+    await new Promise(r => setTimeout(r, 200));   // 等定位真正生效
+  } else {
+    toast('开始捕获 ' + seg.toFixed(1) + ' 秒…');
+  }
+
+  gifCap = {
+    off: off, octx: octx, w: w, h: h,
+    frames: [], dur: seg * 1000,
+    startT: performance.now(), lastT: -1e9,
+    step: 1000 / GIF_FPS,
+  };
+};
+
+/** 主循环每帧调用：到点就抓一张缩小的画面 */
+function updateGifCapture(now) {
+  if (!gifCap) return;
+  const el = now - gifCap.startT;
+
+  document.getElementById('gifBarIn').style.width =
+    Math.min(100, (el / gifCap.dur) * 100).toFixed(1) + '%';
+  if (audioDur() > 0) gifTickTo(audio.currentTime);   // 时间轴上跟一个播放头
+
+  if (el >= gifCap.dur) { finishGifCapture(); return; }
+
+  if (now - gifCap.lastT >= gifCap.step) {
+    gifCap.lastT = now;
+    const { octx, w, h, off } = gifCap;
+    octx.drawImage(canvas, 0, 0, w, h);
+    try {
+      gifCap.frames.push(octx.getImageData(0, 0, w, h));
+    } catch (e) {
+      gifCap = null;
+      toast('无法读取画面像素，GIF 导出不可用');
+      document.getElementById('gifBar').hidden = true;
+    }
+  }
+}
+
+function finishGifCapture() {
+  const cap = gifCap;
+  gifCap = null;
+  if (tlTick) tlTick.style.display = 'none';
+
+  // 还原捕获前的播放状态，别把用户的音乐一直放下去
+  if (gifRestorePlay) {
+    if (!gifRestorePlay.wasPlaying) {
+      audio.pause();
+      try { audio.currentTime = gifRestorePlay.pos; } catch (e) {}
+    }
+    gifRestorePlay = null;
+  }
+
+  if (!cap || !cap.frames.length) {
+    document.getElementById('gifBar').hidden = true;
+    document.getElementById('gifSetup').hidden = false;
+    toast('没有捕获到任何帧');
+    return;
+  }
+  document.getElementById('gifBarIn').style.width = '100%';
+  toast('正在编码 ' + cap.frames.length + ' 帧…');
+
+  // 让出两帧，好让"编码中"的提示先画出来，再跑同步的重活
+  setTimeout(() => {
+    try {
+      const palette = medianCut(buildHistogram(cap.frames, cap.w, cap.h), 256);
+      const lut = makeColorLUT(palette);
+      const idxFrames = cap.frames.map(f => {
+        const d = f.data, out = new Uint8Array(cap.w * cap.h);
+        for (let i = 0, p = 0; p < out.length; i += 4, p++) {
+          out[p] = lut(d[i], d[i + 1], d[i + 2]);
+        }
+        return out;
+      });
+      const bytes = buildGif(idxFrames, cap.w, cap.h, palette, Math.round(100 / GIF_FPS));
+      gifBlob = new Blob([bytes], { type: 'image/gif' });
+      gifName = 'shake-' + Date.now() + '.gif';
+
+      const url = URL.createObjectURL(gifBlob);
+      const im = document.getElementById('gifImg');
+      if (im.dataset.url) URL.revokeObjectURL(im.dataset.url);
+      im.src = url; im.dataset.url = url;
+
+      document.getElementById('gifInfo').textContent =
+        cap.w + '×' + cap.h + ' · ' + cap.frames.length + ' 帧 · ' +
+        (gifBlob.size / 1024).toFixed(0) + ' KB · 无限循环';
+      document.getElementById('gifBar').hidden = true;
+      document.getElementById('gifDone').hidden = false;
+      // GIF 也能走系统分享存进相册，所以按钮显隐和录制那边用同一套判断
+      document.getElementById('gifAlbum').hidden = !canShareFile(gifBlob, gifName);
+      toast('GIF 已生成');
+    } catch (e) {
+      document.getElementById('gifBar').hidden = true;
+      document.getElementById('gifSetup').hidden = false;
+      toast('GIF 编码失败：' + ((e && e.message) || e));
+    }
+  }, 60);
+}
+
+document.getElementById('gifAlbum').onclick = async () => {
+  if (!gifBlob) return;
+  const f = new File([gifBlob], gifName, { type: 'image/gif' });
+  try {
+    await navigator.share({ files: [f], title: '音频Q弹化工具箱' });
+    toast('已交给系统分享面板');
+  } catch (err) {
+    if (err && err.name === 'AbortError') return;
+    toast('分享失败：' + ((err && err.message) || '未知原因'));
+  }
+};
+
+document.getElementById('gifDownload').onclick = () => {
+  if (gifBlob) { download(gifBlob, gifName); toast('已开始下载'); }
+};
+
+document.getElementById('gifClose').onclick = () => {
+  gifMask.hidden = true;
+  gifCap = null;
+};
+
+document.getElementById('gifMask').addEventListener('pointerdown', e => {
+  if (e.target.id === 'gifMask') { gifMask.hidden = true; gifCap = null; }
+});
 
 /* ============================================================
    8. 杂项与启动
@@ -2152,6 +3213,7 @@ buildSliders();
 refreshBgUI();
 syncWheelFromRGB();   // 让色盘的初始状态和存下来的背景色一致
 syncModeUI();   // 按当前模式决定哪些控件该禁用
+syncDriveUI();  // 按驱动方式显示 / 隐藏 BPM 相关的行
 resize();
 syncPlayBtn();
 requestAnimationFrame(loop);
